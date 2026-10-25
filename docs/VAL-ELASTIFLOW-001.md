@@ -279,12 +279,16 @@ complète.
 | ElastiFlow (collecteur) et stockage : versions |  |
 | Date des tests |  |
 | Revalidation | ☐ Initiale ☐ Allégée (P4 à P7 + A2) ☐ Complète — motif : |
+| Profil exécuté (protocole 11) | ☐ Complet ☐ Minimal (`efv plan --profil minimal`) |
 
 **Verdict**
 
 - ☐ Validé : tous les critères d'acceptation sont atteints.
 - ☐ Validé avec réserves : écarts listés en section 9, sans impact sur l'usage prévu.
 - ☐ Non validé : un ou plusieurs critères essentiels ne sont pas atteints, actions correctives en section 9.
+
+Sur le profil minimal, le verdict porte la mention « profil minimal » : un « Validé » ne vaut pas validation
+complète, et ne couvre que l'usage par qos-audit.
 
 Sans confirmation écrite de l'opérateur (P9 KO), le verdict ne porte pas sur la QoS : les résultats Q sont
 rapportés comme « observés, non contractuels ».

@@ -126,3 +126,10 @@ tests:
   - {id: G4, serie: G, manuel: "IPv6 : mêmes tests en IPv6"}
   - {id: G5, serie: G, manuel: "Fragmentation : UDP -l 3000"}
   - {id: G6, serie: G, manuel: "Compteurs d'interface : display counters rate inbound interface"}
+
+# Sous-ensembles du plan (efv plan --profil NOM). Sélecteur : identifiant, motif (Q1-*) ou groupe.
+# Les tests de phase 0 hors iperf (P1 à P4, P7 à P9) restent des prérequis de tout profil (7.6).
+profils:
+  # Environ 1 jour (issue #11) : de quoi produire une calibration exploitable par qos-audit.
+  # Un « Validé » sur ce profil ne vaut pas validation complète (protocole 11, VAL-ELASTIFLOW-001).
+  minimal: [P5, P6, A2, A3, B1, B5, Q1-*, Q2-*, Q3, G1, G6]

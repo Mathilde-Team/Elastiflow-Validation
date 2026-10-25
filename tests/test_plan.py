@@ -239,3 +239,79 @@ def test_cli_plan_cir_invalide(args):
 
 def test_cli_plan_fichier_invalide(tmp_path):
     assert cli.main(["plan", "--lien", "10M", "--plan", str(tmp_path / "absent.yaml")]) == 2
+
+
+# --- Profils (#11) ---
+
+
+def test_profil_minimal(defaut):
+    minimal = plan.plan_par_defaut("minimal")
+    ids = [t.id for t in minimal]
+    assert ids[:6] == ["P5", "P6", "A2", "A3", "B1", "B5"]
+    assert {f"Q1-{i}" for i in range(1, 8)} <= set(ids) and {"G1", "G6"} <= set(ids)
+    assert len([i for i in ids if i.startswith("Q2-")]) == 12
+    assert {t.id for t in defaut if t.groupe == "Q3"} <= set(ids)
+    assert not {"A1", "A2-4096", "C1", "D1", "E1", "Q4-EF", "Q5-1", "G4", "G5"} & set(ids)
+    # ports du plan complet, inchangés
+    complet = _par_id(defaut)
+    assert all(t.ports == complet[t.id].ports for t in minimal)
+    # environ une journée d'injection
+    heures = plan.duree_totale(plan.executions(minimal, 10e6), 10e6) / 3600
+    assert 6 < heures < 10
+
+
+_PROFILS = """
+version: 1
+tests:
+  - {id: X1, protocole: udp, debit: 5%, taille: 500, duree: 60}
+  - {id: X2, groupe: G, protocole: udp, debit: 5%, taille: 500, duree: 60}
+  - {id: Y1, groupe: G, protocole: udp, debit: 5%, taille: 500, duree: 60}
+"""
+
+
+def test_profil_selecteurs_et_ordre():
+    texte = _PROFILS + "profils: {p: [Y1, X*], g: [G]}\n"
+    assert [t.id for t in plan.charger_plan(texte, "p")] == ["X1", "X2", "Y1"]
+    assert [(t.id, t.ports) for t in plan.charger_plan(texte, "g")] == [
+        ("X2", (40002,)),
+        ("Y1", (40003,)),
+    ]
+    assert len(plan.charger_plan(texte)) == 3
+
+
+@pytest.mark.parametrize(
+    ("suffixe", "message"),
+    [
+        ("", "profil inconnu « p » \\(profils : aucun\\)"),
+        ("profils: {q: [X1]}\n", "profil inconnu « p » \\(profils : q\\)"),
+        ("profils: [X1]\n", "listes de sélecteurs"),
+        ("profils: {p: X1}\n", "listes de sélecteurs"),
+        ("profils: {p: [Z9]}\n", "« Z9 » ne désigne aucun test"),
+        ("profils: {p: [1]}\n", "sélecteur invalide"),
+        ("profils: {p: ['']}\n", "sélecteur invalide"),
+    ],
+)
+def test_profil_invalide(suffixe, message):
+    with pytest.raises(ValueError, match=message):
+        plan.charger_plan(_PROFILS + suffixe, "p")
+
+
+def test_cli_plan_profil(capsys, tmp_path):
+    assert cli.main(["plan", "--lien", "10M", "--profil", "minimal"]) == 0
+    sortie = capsys.readouterr().out
+    assert "| A2 | 1 | A |" in sortie and "| C1 |" not in sortie
+    assert (
+        "Profil minimal : un verdict « Validé » sur ce profil ne vaut pas validation complète"
+        in sortie
+    )
+    assert "Tests manuels (hors iperf) : G1, G6" in sortie
+    assert cli.main(["plan", "--lien", "10M", "--profil", "inconnu"]) == 2
+    f = tmp_path / "plan.yaml"
+    f.write_text(_PROFILS + "profils: {p: [X1]}\n", "utf-8")
+    assert (
+        cli.main(["plan", "--lien", "10M", "--plan", str(f), "--profil", "p", "--format", "csv"])
+        == 0
+    )
+    assert capsys.readouterr().out.count("\n") == 2
+    assert cli.main(["plan", "--lien", "10M", "--plan", str(f), "--profil", "p"]) == 0
+    assert "Tests manuels" not in capsys.readouterr().out

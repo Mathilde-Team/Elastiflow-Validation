@@ -190,6 +190,10 @@ def _ajouter_plan(sous: argparse._SubParsersAction) -> None:
     p.add_argument("--lien", type=debit, required=True, help="débit effectif du lien (10M, 1G…)")
     p.add_argument("--plan", type=Path, help="plan YAML (défaut : plan du protocole)")
     p.add_argument(
+        "--profil",
+        help="sous-ensemble déclaré dans le plan (minimal : environ 1 jour) ; défaut : complet",
+    )
+    p.add_argument(
         "--cir",
         type=classe_debit,
         action="append",
@@ -259,7 +263,10 @@ def commande_plan(arguments: argparse.Namespace) -> int:
     """Affiche le plan converti pour le lien demandé (table Markdown ou CSV)."""
     logger.debug("commande_plan : {}", arguments)
     try:
-        tests = plan.charger_plan(arguments.plan) if arguments.plan else plan.plan_par_defaut()
+        if arguments.plan:
+            tests = plan.charger_plan(arguments.plan, arguments.profil)
+        else:
+            tests = plan.plan_par_defaut(arguments.profil)
         execs = plan.executions(tests, arguments.lien, dict(arguments.cir))
     except (OSError, ValueError) as exc:
         logger.error("plan : {}", exc)
@@ -277,6 +284,11 @@ def commande_plan(arguments: argparse.Namespace) -> int:
         manuels = [t.id for t in tests if t.manuel is not None]
         duree = plan.duree_totale(execs, arguments.lien)
         print()
+        if arguments.profil:
+            print(
+                f"Profil {arguments.profil} : un verdict « Validé » sur ce profil "
+                "ne vaut pas validation complète"
+            )
         print(f"{len(execs)} exécutions, durée {duree / 3600:.1f} h (pauses de 5 min incluses)")
         if manuels:
             print(f"Tests manuels (hors iperf) : {', '.join(manuels)}")

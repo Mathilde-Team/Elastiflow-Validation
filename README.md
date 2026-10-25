@@ -47,6 +47,7 @@ Q2 sont exprimés en % du débit contractuel de la classe, à fournir avec `--ci
 uv run efv plan --lien 10M --cir EF=2M --cir AF41=3M --cir D1=2M --cir BF=3M
 uv run efv plan --lien 1G --format csv > plan.csv
 uv run efv plan --lien 10M --plan mon-plan.yaml
+uv run efv plan --lien 10M --profil minimal   # sous-ensemble d'environ 1 jour (protocole 11)
 ```
 
 ## Développement

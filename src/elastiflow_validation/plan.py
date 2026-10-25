@@ -4,10 +4,15 @@ Le plan est un fichier YAML (``plans/protocole.yaml`` par défaut) décrivant ch
 protocole, débit (% du lien, % du débit contractuel de la classe, absolu ou ``max``), taille IP,
 DSCP ou octet TOS, durée ou volume, répétitions, sampling pendant le test. Les ports sources sont
 attribués dans l'ordre du fichier, ``40000 + N`` avec N à partir de 1, un port par processus iperf.
+
+Une section ``profils`` nomme des sous-ensembles du plan (``minimal`` : environ 1 jour, issue #11).
+Un sélecteur désigne un identifiant, un motif (``Q1-*``) ou un groupe ; les ports restent ceux du
+plan complet, pour que les compteurs nft d'un test ne changent pas d'un profil à l'autre.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from dataclasses import dataclass
 from importlib import resources
@@ -240,14 +245,65 @@ def _test(brut: object, n: int) -> Test:
     return test
 
 
-def charger_plan(source: Path | str) -> list[Test]:
+def _selection(tests: list[Test], selecteur: object, profil: str) -> list[Test]:
+    """Tests désignés par un sélecteur de profil : identifiant, motif ``fnmatch`` ou groupe."""
+    logger.debug("_selection : {} dans {}", selecteur, profil)
+    if not isinstance(selecteur, str) or not selecteur:
+        logger.debug("_selection : sélecteur invalide")
+        raise ValueError(f"profil {profil} : sélecteur invalide {selecteur!r}")
+    choisis = [t for t in tests if fnmatch.fnmatchcase(t.id, selecteur) or t.groupe == selecteur]
+    if not choisis:
+        logger.debug("_selection : aucun test")
+        raise ValueError(f"profil {profil} : « {selecteur} » ne désigne aucun test")
+    logger.debug("_selection : {} test(s)", len(choisis))
+    return choisis
+
+
+def _profil(brut: dict, tests: list[Test], nom: str) -> list[Test]:
+    """Sous-ensemble ``nom`` du plan, dans l'ordre du fichier."""
+    logger.debug("_profil : entrée {}", nom)
+    profils = brut.get("profils") or {}
+    if not isinstance(profils, dict) or not all(isinstance(v, list) for v in profils.values()):
+        logger.debug("_profil : section invalide")
+        raise ValueError("plan : « profils » attend des listes de sélecteurs par nom")
+    if nom not in profils:
+        logger.debug("_profil : profil inconnu")
+        connus = ", ".join(sorted(profils)) or "aucun"
+        raise ValueError(f"plan : profil inconnu « {nom} » (profils : {connus})")
+    ids = {t.id for sel in profils[nom] for t in _selection(tests, sel, nom)}
+    choisis = [t for t in tests if t.id in ids]
+    logger.debug("_profil : {} test(s)", len(choisis))
+    return choisis
+
+
+def _texte_plan(source: Path | str | None) -> str:
+    """Texte YAML d'un plan : chemin, texte, ou plan du protocole livré avec le paquet."""
+    logger.debug("_texte_plan : entrée")
+    if source is None:
+        texte = (
+            resources.files("elastiflow_validation")
+            .joinpath("plans/protocole.yaml")
+            .read_text(encoding="utf-8")
+        )
+    else:
+        texte = source.read_text(encoding="utf-8") if isinstance(source, Path) else source
+    logger.debug("_texte_plan : {} caractères", len(texte))
+    return texte
+
+
+def charger_plan(source: Path | str, profil: str | None = None) -> list[Test]:
     """Charge et valide un plan YAML (chemin, ou texte YAML si ``source`` est une chaîne).
 
+    Args:
+        source: Chemin du plan, ou texte YAML.
+        profil: Nom d'un profil de la section ``profils`` (défaut : plan complet).
+
     Raises:
-        ValueError: Plan invalide (champ manquant ou inconnu, identifiant en double, port > 65535…).
+        ValueError: Plan invalide (champ manquant ou inconnu, identifiant en double, port > 65535,
+            profil inconnu ou sélecteur sans test…).
     """
     logger.debug("charger_plan : entrée {}", source if isinstance(source, Path) else "<texte>")
-    texte = source.read_text(encoding="utf-8") if isinstance(source, Path) else source
+    texte = _texte_plan(source)
     try:
         brut = yaml.safe_load(texte)
     except yaml.YAMLError as exc:
@@ -274,19 +330,16 @@ def charger_plan(source: Path | str) -> list[Test]:
     if n - 1 + PORT_BASE > 65535:
         logger.debug("charger_plan : ports épuisés")
         raise ValueError("plan : trop de tests, ports sources au-delà de 65535")
+    if profil is not None:
+        tests = _profil(brut, tests, profil)
     logger.debug("charger_plan : {} tests", len(tests))
     return tests
 
 
-def plan_par_defaut() -> list[Test]:
-    """Plan du protocole livré avec le paquet (``plans/protocole.yaml``)."""
-    logger.debug("plan_par_defaut : entrée")
-    texte = (
-        resources.files("elastiflow_validation")
-        .joinpath("plans/protocole.yaml")
-        .read_text(encoding="utf-8")
-    )
-    tests = charger_plan(texte)
+def plan_par_defaut(profil: str | None = None) -> list[Test]:
+    """Plan du protocole livré avec le paquet (``plans/protocole.yaml``), ou l'un de ses profils."""
+    logger.debug("plan_par_defaut : entrée {}", profil)
+    tests = charger_plan(_texte_plan(None), profil)
     logger.debug("plan_par_defaut : {} tests", len(tests))
     return tests
 

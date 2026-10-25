@@ -733,6 +733,23 @@ Mathilde-Team/qos-audit#35.
 
 Total d'environ **2 jours**. Pour raccourcir : ramener les tests de 30 min à 10 min pour les débits supérieurs à 50 % du lien (le nombre d'échantillons y est déjà élevé), et ne conserver 30 min que pour A1 à A3.
 
+**Sous-ensemble minimal (environ 1 jour).** Pour produire vite une calibration exploitable par qos-audit, le
+profil `minimal` du plan (`efv plan --profil minimal`) ne garde que :
+
+| Bloc | Tests | Ce que qos-audit en tire |
+|---|---|---|
+| Phase 0 | P1 à P9 | noms de champs, facteur d'échantillonnage, base IP/trame, délai d'ingestion, contexte sFlow |
+| Série A | A2, A3 (avec leurs répétitions) | justesse des volumes |
+| Série B | B1, B5 | erreur selon la taille des paquets |
+| QoS | Q1, Q2, Q3 | DSCP vus, remarquage opérateur, priorisation |
+| Gestion | G1, G6 | interfaces d'entrée et de sortie, compteurs à 30 s |
+
+Soit environ 8 h d'injection, pauses comprises, plus la phase 0 hors iperf et l'analyse. Le verdict précise le
+**profil exécuté** : un « Validé » obtenu sur le profil minimal ne vaut **pas** validation complète (notamment
+séries C, D et E, Q4 à Q6, A1, A4 à A6, B2 à B4 et G2 à G5 non jouées) ; la validation complète reste à faire
+avant d'étendre l'usage au-delà de l'audit QoS. Le nombre de dépassements tolérés dépend du nombre de mesures du
+profil (règle du verdict global, issue #9).
+
 ---
 
 ## 12. Annexes

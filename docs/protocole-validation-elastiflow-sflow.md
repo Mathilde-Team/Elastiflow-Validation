@@ -460,7 +460,7 @@ Calcul de la valeur `-S` : `-S` positionne l'octet TOS, soit `DSCP × 4`. Exempl
 
 **À propos de « EF 45 ».** La RFC définit EF avec le DSCP **46**. Si le « 45 » désigne une **part de bande passante** réservée à la classe (par exemple 45 % du débit souscrit), il n'y a rien à changer au marquage. Si l'opérateur impose réellement le DSCP 45 (`0xB4`), remplacer `0xB8` par `0xB4` dans les tests. Le test Q1 envoie les deux valeurs pour voir celle que l'opérateur reconnaît.
 
-**À confirmer par écrit avec l'opérateur** avant de tester : correspondance exacte D1/D2/D3 vers les DSCP, débit garanti (CIR) et débit maximal de chaque classe, taille de rafale tolérée, comportement hors profil (rejet ou remarquage vers une classe inférieure), partage ou non du débit entre classes, traitement des DSCP inconnus.
+**À confirmer par écrit avec l'opérateur** avant de tester (condition du verdict, voir 8.6) : correspondance exacte D1/D2/D3 vers les DSCP, débit garanti (CIR) et débit maximal de chaque classe, taille de rafale tolérée, comportement hors profil (rejet ou remarquage vers une classe inférieure), partage ou non du débit entre classes, traitement des DSCP inconnus.
 
 ### 8.2 Ce que l'on valide
 
@@ -532,6 +532,32 @@ Le CoS apparaît alors dans l'en-tête échantillonné. Vérifier que le switch 
 | Charge livrée par classe | ElastiFlow, point B, et rapport du serveur iperf. |
 | **Pertes** par classe | Rapport du serveur iperf (champ de pertes) et `display qos queue-statistics interface <port> outbound` : sFlow ne voit pas les pertes en sortie. |
 | Gigue et latence | Rapport iperf, `--trip-times` avec horloges synchronisées. |
+
+### 8.6 Confirmation écrite de l'opérateur : condition du verdict QoS
+
+Les tests Q mesurent ce que l'opérateur fait du trafic **sur un lien de test, à un moment donné**. Ils ne
+remplacent pas un engagement écrit sur les classes, les débits garantis et le traitement du hors-profil : une
+politique peut différer d'un site, d'un circuit ou d'une période à l'autre.
+
+La confirmation écrite de l'opérateur (contrat, annexe technique ou réponse écrite référencée) est donc une
+**condition du verdict** sur la QoS (vérification P9 de la phase 0) :
+
+- **avec** elle, les résultats Q sont comparés aux engagements et peuvent conclure « conforme » ou « non conforme » ;
+- **sans** elle, les résultats Q sont publiés comme **« observés, non contractuels »** : ils décrivent le comportement
+  constaté, sans valeur d'engagement, et le verdict de la section QoS ne peut pas être « validé ».
+
+Questions à envoyer à l'opérateur avant la série (réponse écrite, datée, référencée dans le rapport) :
+
+1. Correspondance exacte des classes **D1, D2 et D3** vers les DSCP (hypothèse du 8.1 : AF31, AF21, AF11).
+2. Sens de **« EF 45 »** : DSCP 45 (`0xB4`) imposé au marquage, ou part de bande passante de 45 % (EF restant 46) ?
+3. **Débit garanti (CIR)** et débit maximal de chaque classe, taille de rafale tolérée, partage ou non du débit
+   inutilisé entre classes.
+4. Traitement du trafic **hors profil** par classe : rejet, ou remarquage vers quelle classe ?
+5. Traitement des **DSCP inconnus** ou non contractuels (CS6, CS5, ECN seul, Q5) : remis à BF, conservés, rejetés ?
+6. Existence d'une **classe inférieure à BF** (scavenger, CS1 testé en Q5-3) et son traitement sous congestion.
+7. Le marquage et les profils sont-ils les mêmes sur tous les sites et circuits du contrat ?
+
+Côté qos-audit, la même règle s'applique aux constats de conformité QoS : voir Mathilde-Team/qos-audit#14.
 
 ---
 
@@ -700,7 +726,7 @@ display clock
 ### 12.3 Check-list avant de lancer la série
 
 - [ ] NTP aligné sur le client, le serveur, les switchs et ElastiFlow.
-- [ ] Contrat opérateur relu : correspondance des classes, CIR par classe, comportement hors profil.
+- [ ] Confirmation écrite de l'opérateur reçue et référencée (questions du 8.6) ; à défaut, résultats Q « observés, non contractuels ».
 - [ ] `display sflow` : collecteur joignable, sampling-rate par interface conforme au tableau 4.2, sens d'échantillonnage identifié.
 - [ ] Export sFlow sur un chemin qui ne traverse pas le lien testé, ou classé en BE.
 - [ ] Noms de champs ElastiFlow relevés sur un enregistrement de test (9.2).

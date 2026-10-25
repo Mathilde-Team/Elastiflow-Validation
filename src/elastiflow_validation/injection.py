@@ -144,7 +144,9 @@ class SystemeReel:
 
     def dormir(self, secondes: float) -> None:
         """Attend ``secondes``."""
+        logger.debug("dormir : {} s", secondes)
         time.sleep(secondes)
+        logger.debug("dormir : fin")
 
     def confirmer(self, message: str) -> None:
         """Affiche un geste à faire et attend Entrée."""
@@ -154,9 +156,11 @@ class SystemeReel:
 
     def fermer(self) -> None:
         """Ferme les journaux iperf ouverts."""
+        logger.debug("fermer : {} journal(aux)", len(self._journaux))
         for sortie in self._journaux:
             sortie.close()
         self._journaux.clear()
+        logger.debug("fermer : fait")
 
 
 def _commentaire(e: plan.Execution, port: int) -> str:
@@ -213,9 +217,12 @@ def _commandes_nft_initiales() -> list[list[str]]:
 
 def _regle_nft(e: plan.Execution, port: int) -> list[str]:
     """Règle ``counter`` d'un port source."""
+    logger.debug("_regle_nft : {}#{} port {}", e.test.id, e.repetition, port)
     proto = e.test.protocole or ""
-    return ["nft", "add", "rule", *TABLE, CHAINE, proto, "sport", str(port), "counter",
-            "comment", f'"{_commentaire(e, port)}"']  # fmt: skip
+    regle = ["nft", "add", "rule", *TABLE, CHAINE, proto, "sport", str(port), "counter",
+             "comment", f'"{_commentaire(e, port)}"']  # fmt: skip
+    logger.debug("_regle_nft : {}", regle)
+    return regle
 
 
 def lire_compteurs(json_nft: str) -> dict[str, tuple[int, int, int]]:
@@ -248,14 +255,17 @@ def lire_compteurs(json_nft: str) -> dict[str, tuple[int, int, int]]:
 
 def _ligne(e: plan.Execution, debut: int, fin: int, paquets: int, octets: int) -> list[str]:
     """Ligne de ``resultats.csv`` d'une exécution (ordre de ``COLONNES``)."""
+    logger.debug("_ligne : {}#{}", e.test.id, e.repetition)
     t = e.test
     ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
-    return [
+    ligne = [
         t.id, str(e.repetition), t.serie, t.groupe or "", t.protocole or "", e.iperf_b or "max",
         "" if t.taille is None else str(t.taille), f"{t.tos or 0:#04x}", ports,
         "nominal" if t.sampling is None else f"1:{t.sampling}",
         str(debut), str(fin), str(paquets), str(octets),
     ]  # fmt: skip
+    logger.debug("_ligne : {} paquets, {} octets", paquets, octets)
+    return ligne
 
 
 def _preparer(lancement: Lancement, systeme: Systeme, sampling_courant: int | None) -> int | None:

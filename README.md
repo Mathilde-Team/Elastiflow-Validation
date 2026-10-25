@@ -1,6 +1,36 @@
-# Nom du projet
+# Elastiflow-Validation
 
-<!-- Remplacer ce README. La partie « Socle qualité » peut rester telle quelle. -->
+Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) à travers des équipements Comware qui exportent du **sFlow**, puis on compare ce qu'ElastiFlow affiche à la vérité terrain mesurée sur le client et le serveur (compteurs nft, rapport iperf).
+
+## Documents de référence
+
+- [Protocole de test](docs/protocole-validation-elastiflow-sflow.md) : théorie de l'échantillonnage, sampling-rate par débit de lien, injection, QoS opérateur, lecture dans ElastiFlow.
+- [Document de validation VAL-ELASTIFLOW-001](docs/VAL-ELASTIFLOW-001.md) : critères d'acceptation, fiches de test, verdict.
+
+## Chaîne visée
+
+| Étape | Commande | Issue |
+| --- | --- | --- |
+| Calculs (sampling-rate, borne à 95 %, DSCP/TOS, tailles) | `efv sampling` | #2 |
+| Plan de tests (phase 0, séries A à E, QoS, G1 à G6) | `efv plan` | #3 |
+| Injection iperf2 et relevé nft vers `resultats.csv` | `efv injecter` | #4 |
+| Lecture ElastiFlow (Elasticsearch / OpenSearch) | `efv lire` | #5 |
+| Comparaison, verdict et document de validation rempli | `efv rapport` | #6 |
+
+## Installation et usage
+
+```bash
+uv sync --locked
+uv run efv --help
+uv run efv --debug ...      # traces de debug (ou SOCLE_DEBUG=1)
+```
+
+## Développement
+
+```bash
+make lint   # ruff check + ruff format --check
+make test   # pytest, couverture 95 % minimum (branches comprises)
+```
 
 ## Socle qualité Mathilde-Team
 

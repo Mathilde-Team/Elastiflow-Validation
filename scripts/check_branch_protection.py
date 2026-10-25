@@ -58,9 +58,7 @@ def checks_attendus(regle: dict) -> set[str]:
 
 def comparer(regle: dict, branche_api: dict) -> list[str]:
     """Liste des écarts entre la règle et la protection réelle."""
-    logger.debug(
-        "comparer() called | branche protégée={}", bool(branche_api.get("protected"))
-    )
+    logger.debug("comparer() called | branche protégée={}", bool(branche_api.get("protected")))
     if not branche_api.get("protected"):
         logger.debug("comparer() returning | 1 écart (branche non protégée)")
         return ["la branche n'est pas protégée"]
@@ -107,18 +105,14 @@ def main() -> int:
         logger.debug("main() returning | 2 (règle absente)")
         return 2
     except json.JSONDecodeError as erreur:
-        logger.error(
-            "règle illisible : {} (ligne {}, {})", chemin, erreur.lineno, erreur.msg
-        )
+        logger.error("règle illisible : {} (ligne {}, {})", chemin, erreur.lineno, erreur.msg)
         print(f"::error::règle illisible : {chemin} (ligne {erreur.lineno}, {erreur.msg})")
         logger.debug("main() returning | 2 (règle illisible)")
         return 2
     try:
         branche_api = lire_protection(args.depot, args.branche, os.environ.get("GITHUB_TOKEN"))
     except urllib.error.HTTPError as erreur:
-        logger.error(
-            "lecture de la branche {} impossible : HTTP {}", args.branche, erreur.code
-        )
+        logger.error("lecture de la branche {} impossible : HTTP {}", args.branche, erreur.code)
         print(f"::error::lecture de la branche {args.branche} impossible : HTTP {erreur.code}")
         logger.debug("main() returning | 1 (HTTP {})", erreur.code)
         return 1

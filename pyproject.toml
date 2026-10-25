@@ -1,40 +1,51 @@
-# Projet Python d'exemple du socle Mathilde-Team. À adapter (nom, dépendances,
-# paquet mesuré) ; garder les sections [tool.coverage.*] : le seuil de
-# couverture est déclaré ici et nulle part ailleurs (SOCLE.md §4).
+# Socle Mathilde-Team : le seuil de couverture est déclaré ici et nulle part
+# ailleurs (SOCLE.md §4). Versions des outils figées (groupe dev).
 [project]
-name = "modele-depot"
-version = "0.0.0"
-description = "Modèle de dépôt Mathilde-Team : socle qualité prêt à l'emploi"
+name = "elastiflow-validation"
+version = "0.1.0"
+description = "Contre-expertise d'ElastiFlow par injection de trafic iperf2 et lecture sFlow"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     # Journalisation (SOCLE §8) : loguru pour tout le Python de l'équipe.
-    "loguru>=0.7",
+    "loguru==0.7.3",
 ]
+
+[project.scripts]
+efv = "elastiflow_validation.cli:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3",
-    "pytest-cov>=6.0",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.17.2",
 ]
 
-[tool.uv]
-package = false
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["scripts"]
 addopts = "-ra"
 
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
 [tool.coverage.run]
 # Couverture des branches obligatoire (SOCLE.md §4).
 branch = true
-# Code mesuré : à remplacer par le paquet du dépôt (par exemple ["src/mon_paquet"]).
-source = ["scripts"]
+source = ["src/elastiflow_validation", "scripts"]
 
 [tool.coverage.report]
 # Seuil bloquant de l'équipe (décision du 21/10/2026, Mathilde-Team/.github#9).
-# Dépôt existant sous 95 % : fixer d'abord la mesure du jour, puis relever à
-# chaque PR de tests jusqu'à 95 (palier et date cible dans l'issue de suivi).
 fail_under = 95
 show_missing = true
 skip_covered = false

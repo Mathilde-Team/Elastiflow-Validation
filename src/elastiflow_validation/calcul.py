@@ -1,6 +1,7 @@
 """Formules du protocole de validation (§3, §4, §7.3, §8.1, §12.1).
 
 - précision d'un échantillonnage sFlow : borne à 95 % ``196/√n``, n cible ``(196/e)²`` (§3.1) ;
+  sur les octets, avec des tailles dispersées : ``196·√((1 + CV²)/n)`` (§3.1, #10) ;
 - probabilité de voir un flux : ``1 − exp(−n attendu)`` (§3.3) ;
 - sampling-rate recommandé : puissance de 2 inférieure de
   ``débit plancher × fenêtre / (8 × taille × n cible)`` (§4.1, §4.3) ;
@@ -13,6 +14,7 @@ Les tableaux 3.2, 4.2, 7.3 et 12.1 du protocole sont rejoués par les tests.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from loguru import logger
@@ -21,12 +23,15 @@ __all__ = [
     "CLASSES",
     "Dimensionnement",
     "charge_udp",
+    "cv_tailles",
     "dimensionner",
     "dscp",
     "dscp_de_tos",
     "erreur_95",
+    "erreur_95_octets",
     "fragmente",
     "n_cible",
+    "n_cible_octets",
     "paquets",
     "probabilite_detection",
     "sampling_rate",
@@ -97,6 +102,58 @@ def erreur_95(n: float) -> float:
     return erreur
 
 
+def cv_tailles(tailles: Sequence[float], poids: Sequence[float] | None = None) -> float:
+    """Coefficient de variation (écart type / moyenne) de la taille des paquets.
+
+    Args:
+        tailles: Tailles des paquets, ou tailles distinctes d'un mélange si ``poids`` est fourni.
+        poids: Part (ou nombre) de paquets de chaque taille ; ``None`` : un paquet par taille.
+
+    Returns:
+        CV de la distribution (écart type de population) ; 0 pour des tailles fixes (iperf ``-l``).
+    """
+    logger.debug("cv_tailles : {} tailles, poids={}", len(tailles), poids is not None)
+    w = [1.0] * len(tailles) if poids is None else list(poids)
+    if not tailles or len(w) != len(tailles) or any(x < 0 for x in w) or sum(w) <= 0:
+        logger.debug("cv_tailles : entrée invalide")
+        raise ValueError("tailles non vides et poids positifs de même longueur attendus")
+    if any(t <= 0 for t in tailles):
+        logger.debug("cv_tailles : taille non positive")
+        raise ValueError("tailles strictement positives attendues")
+    total = sum(w)
+    moyenne = sum(t * x for t, x in zip(tailles, w, strict=True)) / total
+    variance = sum(x * (t - moyenne) ** 2 for t, x in zip(tailles, w, strict=True)) / total
+    cv = math.sqrt(variance) / moyenne
+    logger.debug("cv_tailles : moyenne={} o, cv={}", moyenne, cv)
+    return cv
+
+
+def erreur_95_octets(n: float, cv: float) -> float:
+    """Borne d'erreur à 95 % sur les **octets** : ``196·√((1 + CV²)/n)`` (∞ si n = 0).
+
+    La borne ``196/√n`` ne vaut pour les octets que si tous les paquets ont la même taille (CV = 0).
+    """
+    logger.debug("erreur_95_octets : n={}, cv={}", n, cv)
+    if cv < 0:
+        logger.debug("erreur_95_octets : cv négatif")
+        raise ValueError(f"coefficient de variation négatif : {cv}")
+    erreur = erreur_95(n) * math.sqrt(1 + cv**2)
+    logger.debug("erreur_95_octets : {} %", erreur)
+    return erreur
+
+
+def n_cible_octets(erreur_pct: float = 5.0, cv: float = 0.0) -> int:
+    """Échantillons pour une erreur cible sur les octets : ``⌈(196/e)² × (1 + CV²)⌉``."""
+    logger.debug("n_cible_octets : erreur={} %, cv={}", erreur_pct, cv)
+    if erreur_pct <= 0 or cv < 0:
+        logger.debug("n_cible_octets : paramètres invalides")
+        raise ValueError(f"erreur > 0 et CV ≥ 0 attendus : {erreur_pct}, {cv}")
+    # Arrondi à 1e-9 avant ⌈⌉ : neutralise l'erreur flottante du produit (2 603,0000…1 → 2 603).
+    n = math.ceil(round((Z_95 / erreur_pct) ** 2 * (1 + cv**2), 9))
+    logger.debug("n_cible_octets : {}", n)
+    return n
+
+
 def probabilite_detection(n_attendu: float) -> float:
     """Probabilité de voir au moins un échantillon d'un flux : ``1 − exp(−n attendu)`` (§3.3)."""
     logger.debug("probabilite_detection : n attendu={}", n_attendu)
@@ -127,6 +184,7 @@ def sampling_rate(
     fenetre_s: float = 300,
     taille_ip: int = 1500,
     erreur_pct: float = 5.0,
+    cv: float = 0.0,
 ) -> int:
     """Sampling-rate N (puissance de 2 inférieure) qui garde l'erreur cible au plancher (§4.1).
 
@@ -136,22 +194,28 @@ def sampling_rate(
         fenetre_s: Fenêtre d'analyse en secondes.
         taille_ip: Taille IP des paquets pour la précision (1500 o = cas le moins favorable).
         erreur_pct: Erreur cible à 95 %, en pour cent.
+        cv: Coefficient de variation de la taille des paquets (0 : erreur sur les paquets,
+            ou octets à taille fixe ; > 0 : erreur sur les octets du trafic réel).
 
     Returns:
         N, au moins 1 (1:1 = comptage exhaustif).
     """
     logger.debug(
-        "sampling_rate : lien={} bit/s, plancher={}, fenetre={} s, taille={} o, erreur={} %",
+        "sampling_rate : lien={} bit/s, plancher={}, fenetre={} s, taille={} o, erreur={} %, cv={}",
         debit_lien_bps,
         plancher,
         fenetre_s,
         taille_ip,
         erreur_pct,
+        cv,
     )
     if not 0 < plancher <= 1:
         logger.debug("sampling_rate : plancher invalide")
         raise ValueError(f"plancher invalide : {plancher} (part du lien, entre 0 exclu et 1)")
-    n_max = max(1.0, paquets(debit_lien_bps * plancher, fenetre_s, taille_ip) / n_cible(erreur_pct))
+    n_max = max(
+        1.0,
+        paquets(debit_lien_bps * plancher, fenetre_s, taille_ip) / n_cible_octets(erreur_pct, cv),
+    )
     rate = 2 ** math.floor(math.log2(n_max))
     logger.debug("sampling_rate : 1:{}", rate)
     return rate
@@ -176,10 +240,11 @@ def dimensionner(
     taille_ip: int = 1500,
     erreur_pct: float = 5.0,
     taille_cout: int = 100,
+    cv: float = 0.0,
 ) -> Dimensionnement:
     """Ligne du tableau 4.2 : précision sur ``taille_ip``, coût sur ``taille_cout``."""
     logger.debug("dimensionner : lien={} bit/s", debit_lien_bps)
-    rate = sampling_rate(debit_lien_bps, plancher, fenetre_s, taille_ip, erreur_pct)
+    rate = sampling_rate(debit_lien_bps, plancher, fenetre_s, taille_ip, erreur_pct, cv)
     plancher_bps = debit_lien_bps * plancher
     n = paquets(plancher_bps, fenetre_s, taille_ip) / rate
     ligne = Dimensionnement(
@@ -187,7 +252,7 @@ def dimensionner(
         plancher_bps=plancher_bps,
         rate=rate,
         echantillons_plancher=n,
-        erreur_pct=None if rate == 1 else erreur_95(n),
+        erreur_pct=None if rate == 1 else erreur_95_octets(n, cv),
         echantillons_s_sature=paquets(debit_lien_bps, 1, taille_cout) / rate,
     )
     logger.debug("dimensionner : {}", ligne)

@@ -13,7 +13,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 | --- | --- | --- |
 | Calculs (sampling-rate, borne à 95 %, DSCP/TOS, tailles) : disponible | `efv sampling` | #2 |
 | Plan de tests (phase 0, séries A à E, QoS, G1 à G6) : disponible | `efv plan` | #3 |
-| Injection iperf2 et relevé nft vers `resultats.csv` | `efv injecter` | #4 |
+| Injection iperf2 et relevé nft vers `resultats.csv` : disponible | `efv injecter` | #4 |
 | Lecture ElastiFlow (Elasticsearch / OpenSearch) | `efv lire` | #5 |
 | Comparaison, verdict et document de validation rempli | `efv rapport` | #6 |
 
@@ -49,6 +49,21 @@ uv run efv plan --lien 1G --format csv > plan.csv
 uv run efv plan --lien 10M --plan mon-plan.yaml
 uv run efv plan --lien 10M --profil minimal   # sous-ensemble d'environ 1 jour (protocole 11)
 ```
+
+`efv injecter` remplace `run_test.sh` (§7.7) sur le client du banc (root, `iperf` 2 et `nft`) : une règle
+nft `counter` par port source, un iperf2 par port (`-B CLIENT:PORT`), les tests d'un même groupe (Q3, Q4)
+lancés ensemble, relevé des compteurs 2 s après la fin, une ligne par test ajoutée à `resultats.csv`, pause de
+5 min entre deux lancements. Les changements de sampling de l'exporteur et les préalables (`tc … netem`) sont
+annoncés et attendent la confirmation de l'opérateur ; les tests de laboratoire demandent `--lab`.
+
+```bash
+uv run efv injecter --lien 10M --test A2 --dry-run          # commandes, sans rien exécuter
+sudo .venv/bin/efv injecter --lien 10M --profil minimal --lab \
+     --cir EF=2M --cir AF41=3M --cir D1=2M --cir BF=3M --sortie resultats.csv
+```
+
+Colonnes de `resultats.csv` : `id`, `repetition`, `serie`, `groupe`, `protocole`, `debit` (`-b`), `taille`
+(IP), `tos`, `ports`, `sampling`, `debut` et `fin` (epoch), `paquets` et `octets` (IP, nft, somme des ports).
 
 ## Développement
 

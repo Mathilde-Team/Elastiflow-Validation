@@ -176,6 +176,10 @@ def test_injecter_ecrit_resultats(tmp_path):
     )
     lignes = _lire(sortie)
     assert list(lignes[0]) == list(injection.COLONNES)
+    # clé de lecture dans ElastiFlow (efv lire, #5)
+    assert {(r["client"], r["serveur"], r["port_destination"]) for r in lignes} == {
+        ("10.10.0.2", "10.20.0.2", "50001")
+    }
     assert [(r["id"], r["repetition"]) for r in lignes] == [
         ("P5", "1"), ("A2", "1"), ("A2", "2"), ("A2", "3"), ("C3", "1"), ("D1", "1")
     ]  # fmt: skip

@@ -638,6 +638,11 @@ Les noms ECS sont standards. **Les noms spécifiques ElastiFlow dépendent de la
 7. **Comparaison.** Estimation ElastiFlow contre référence (octets nft, avec la correction de base établie en phase 0), puis calcul de l'erreur.
 8. **Cas multi-points.** Reprendre 1 à 7 pour chaque exportateur (A et B), puis comparer A et B.
 
+La commande `efv lire` automatise les étapes 1, 2, 4 et 5 pour chaque ligne de `resultats.csv` et relève les
+métadonnées de l'étape 3 (sampling-rates et DSCP lus, par exportateur) dans `lectures.csv` ; les étapes 6 à 8
+relèvent du rapport (`efv rapport`). Elle refuse de démarrer si un champ utilisé n'existe pas dans le mapping
+(§9.2 : noms à préciser avec `--champs`).
+
 ### 9.4 Quoi lire pour chaque objectif
 
 | Objectif | Lecture dans ElastiFlow |

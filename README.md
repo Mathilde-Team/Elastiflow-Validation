@@ -14,7 +14,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 | Calculs (sampling-rate, borne à 95 %, DSCP/TOS, tailles) : disponible | `efv sampling` | #2 |
 | Plan de tests (phase 0, séries A à E, QoS, G1 à G6) : disponible | `efv plan` | #3 |
 | Injection iperf2 et relevé nft vers `resultats.csv` : disponible | `efv injecter` | #4 |
-| Lecture ElastiFlow (Elasticsearch / OpenSearch) | `efv lire` | #5 |
+| Lecture ElastiFlow (Elasticsearch / OpenSearch) vers `lectures.csv` : disponible | `efv lire` | #5 |
 | Comparaison, verdict et document de validation rempli | `efv rapport` | #6 |
 
 ## Installation et usage
@@ -69,7 +69,25 @@ sudo .venv/bin/efv injecter --lien 10M --profil minimal --lab \
 ```
 
 Colonnes de `resultats.csv` : `id`, `repetition`, `serie`, `groupe`, `protocole`, `debit` (`-b`), `taille`
-(IP), `tos`, `ports`, `sampling`, `debut` et `fin` (epoch), `paquets` et `octets` (IP, nft, somme des ports).
+(IP), `tos`, `ports`, `sampling`, `debut` et `fin` (epoch), `paquets` et `octets` (IP, nft, somme des ports),
+`client`, `serveur` et `port_destination` (clé de lecture dans ElastiFlow).
+
+`efv lire` (§9) interroge Elasticsearch ou OpenSearch pour chaque test de `resultats.csv` dont le délai
+d'agrégation est écoulé : filtre sur la clé (IP, ports source, port de destination, protocole) et la fenêtre
+`debut − 1 min` à `fin + --delai` (600 s par défaut, P7), puis, **par exportateur**, sommes brutes d'octets et de
+paquets, nombre d'enregistrements, sommes utiles hors minutes de bord (`--bord`, 60 s, minutes entières),
+débit utile, sampling-rates et DSCP lus. Aucune correction n'est appliquée (base trame ou IP, facteur
+d'échantillonnage : `efv rapport`, #6). Les noms de champs (défauts alignés sur qos-audit) se surchargent par
+`--champs champs.yaml` (`sampling: flow.sampling_interval`, clés : `horodatage`, `ip_source`,
+`ip_destination`, `port_source`, `port_destination`, `protocole`, `octets`, `paquets`, `exportateur`,
+`sampling`, `dscp`) ; chacun est vérifié dans le `_mapping` de l'index avant toute lecture (P4, #14).
+
+```bash
+export EFV_ES_URL=https://elastic.example:9200   # + EFV_ES_API_KEY, ou EFV_ES_USER et EFV_ES_PASSWORD
+uv run efv lire --resultats resultats.csv --sortie lectures.csv --index 'elastiflow-flow-*' --champs champs.yaml
+```
+
+URL et identifiants sont lus dans l'environnement (`EFV_ES_CA` pour l'autorité du cluster) et jamais affichés.
 
 ## Développement
 

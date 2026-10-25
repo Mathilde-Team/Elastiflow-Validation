@@ -187,7 +187,7 @@ def commande_iperf(e: plan.Execution, port: int, banc: Banc) -> list[str]:
         cmd += ["-u", "-l", str(e.charge_udp)]
     if e.iperf_b is not None:
         cmd += ["-b", e.iperf_b]
-    cmd += ["-p", str(banc.port_destination)]
+    cmd += ["-p", str(t.port_destination or banc.port_destination)]
     cmd += ["-t", str(t.duree_s)] if t.duree_s is not None else ["-n", str(t.volume_octets)]
     cmd += ["-i", "10", "-e", "-B", f"{banc.client}:{port}", "-S", f"{t.tos or 0:#04x}"]
     logger.debug("commande_iperf : {}", shlex.join(cmd))

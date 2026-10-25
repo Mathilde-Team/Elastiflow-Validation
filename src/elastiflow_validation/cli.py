@@ -246,6 +246,7 @@ _COLONNES = (
     "duree",
     "ports",
     "sampling",
+    "attendu",
     "note",
 )
 
@@ -266,7 +267,8 @@ def _ligne_plan(e: plan.Execution) -> list[str]:
         else f"-n {plan.format_debit(t.volume_octets or 0)}"
     )
     ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
-    notes = [x for x in ("lab" if t.lab else "", t.prealable or "") if x]
+    port = "" if t.port_destination is None else f"port destination {t.port_destination}"
+    notes = [x for x in ("lab" if t.lab else "", port, t.prealable or "") if x]
     valeurs = [
         t.id,
         str(e.repetition),
@@ -279,6 +281,7 @@ def _ligne_plan(e: plan.Execution) -> list[str]:
         duree,
         ports,
         "nominal" if t.sampling is None else f"1:{t.sampling}",
+        ", ".join(f"{c}:{g}" for c, g in t.attendu),
         " ; ".join(notes),
     ]
     logger.debug("_ligne_plan : {}", valeurs)
@@ -306,7 +309,12 @@ def commande_plan(arguments: argparse.Namespace) -> int:
         manuels = [t.id for t in tests if t.manuel is not None]
         duree = plan.duree_totale(execs, arguments.lien)
         print()
-        if arguments.profil:
+        if arguments.profil == "recette":
+            print(
+                "Recette qos-audit : comparer ses verdicts à la colonne « attendu » "
+                "(comparaison automatique : #6, qos-audit#36)"
+            )
+        elif arguments.profil:
             print(
                 f"Profil {arguments.profil} : un verdict « Validé » sur ce profil "
                 "ne vaut pas validation complète"

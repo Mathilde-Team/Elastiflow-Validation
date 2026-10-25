@@ -1,18 +1,21 @@
 """Ligne de commande ``efv``.
 
-Sous-commande disponible : ``sampling`` (#2). Les suivantes (plan, injecter,
-lire, rapport) sont ajoutées module par module ; voir les issues du dépôt.
+Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3). Les suivantes
+(injecter, lire, rapport) sont ajoutées module par module ; voir les issues du dépôt.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import math
+import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from loguru import logger
 
-from elastiflow_validation import __version__, calcul
+from elastiflow_validation import __version__, calcul, plan
 from elastiflow_validation.journal import configurer
 
 
@@ -27,6 +30,7 @@ def construire_parseur() -> argparse.ArgumentParser:
     parseur.add_argument("--debug", action="store_true", help="traces de debug (ou SOCLE_DEBUG=1)")
     sous = parseur.add_subparsers(dest="commande", metavar="COMMANDE")
     _ajouter_sampling(sous)
+    _ajouter_plan(sous)
     logger.debug("parseur construit")
     return parseur
 
@@ -148,4 +152,128 @@ def commande_sampling(arguments: argparse.Namespace) -> int:
     for ligne in lignes:
         print(_format_ligne(ligne))
     logger.debug("commande_sampling : {} lignes", len(lignes))
+    return 0
+
+
+def classe_debit(texte: str) -> tuple[str, float]:
+    """Débit contractuel d'une classe : ``EF=2M``."""
+    logger.debug("classe_debit : {!r}", texte)
+    classe, sep, valeur = texte.partition("=")
+    if not sep or not classe.strip():
+        logger.debug("classe_debit : forme invalide")
+        raise argparse.ArgumentTypeError(f"forme CLASSE=DEBIT attendue : {texte!r} (ex. EF=2M)")
+    try:
+        calcul.dscp(classe)
+    except ValueError as exc:
+        logger.debug("classe_debit : classe inconnue ({})", exc)
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    resultat = (classe.strip().upper(), debit(valeur))
+    logger.debug("classe_debit : {}", resultat)
+    return resultat
+
+
+def _ajouter_plan(sous: argparse._SubParsersAction) -> None:
+    """Sous-commande ``efv plan`` (§7.8 à §8.3 du protocole)."""
+    logger.debug("ajout de la sous-commande plan")
+    p = sous.add_parser(
+        "plan",
+        help="plan de tests converti en débits absolus pour un lien (§7.8 à §8.3)",
+        description="Charge et valide le plan YAML, puis affiche chaque exécution pour ce lien.",
+    )
+    p.add_argument("--lien", type=debit, required=True, help="débit effectif du lien (10M, 1G…)")
+    p.add_argument("--plan", type=Path, help="plan YAML (défaut : plan du protocole)")
+    p.add_argument(
+        "--cir",
+        type=classe_debit,
+        action="append",
+        default=[],
+        metavar="CLASSE=DEBIT",
+        help="débit contractuel d'une classe, pour Q2 et Q4 (répétable : --cir EF=2M)",
+    )
+    p.add_argument(
+        "--format", choices=("table", "csv"), default="table", help="sortie (défaut table)"
+    )
+    p.set_defaults(action=commande_plan)
+    logger.debug("sous-commande plan ajoutée")
+
+
+_COLONNES = (
+    "id",
+    "rep",
+    "serie",
+    "groupe",
+    "proto",
+    "-b",
+    "-l",
+    "-S",
+    "duree",
+    "ports",
+    "sampling",
+    "note",
+)
+
+
+def _ligne_plan(e: plan.Execution) -> list[str]:
+    """Valeurs d'une exécution, dans l'ordre de ``_COLONNES``."""
+    logger.debug("_ligne_plan : {}", e.test.id)
+    t = e.test
+    if e.debit_bps is not None:
+        b = e.iperf_b or ""
+    elif t.debit is not None and t.debit.base == "cir":
+        b = "CIR ?"
+    else:
+        b = "max"
+    duree = (
+        f"{t.duree_s}s"
+        if t.duree_s is not None
+        else f"-n {plan.format_debit(t.volume_octets or 0)}"
+    )
+    ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    notes = [x for x in ("lab" if t.lab else "", t.prealable or "") if x]
+    valeurs = [
+        t.id,
+        str(e.repetition),
+        t.serie,
+        t.groupe or "",
+        t.protocole or "",
+        b,
+        "" if e.charge_udp is None else str(e.charge_udp),
+        "" if t.tos is None else f"{t.tos:#04x}",
+        duree,
+        ports,
+        "nominal" if t.sampling is None else f"1:{t.sampling}",
+        " ; ".join(notes),
+    ]
+    logger.debug("_ligne_plan : {}", valeurs)
+    return valeurs
+
+
+def commande_plan(arguments: argparse.Namespace) -> int:
+    """Affiche le plan converti pour le lien demandé (table Markdown ou CSV)."""
+    logger.debug("commande_plan : {}", arguments)
+    try:
+        tests = plan.charger_plan(arguments.plan) if arguments.plan else plan.plan_par_defaut()
+        execs = plan.executions(tests, arguments.lien, dict(arguments.cir))
+    except (OSError, ValueError) as exc:
+        logger.error("plan : {}", exc)
+        return 2
+    lignes = [_ligne_plan(e) for e in execs]
+    if arguments.format == "csv":
+        ecrivain = csv.writer(sys.stdout, lineterminator="\n")
+        ecrivain.writerow(_COLONNES)
+        ecrivain.writerows(lignes)
+    else:
+        print("| " + " | ".join(_COLONNES) + " |")
+        print("|" + "---|" * len(_COLONNES))
+        for ligne in lignes:
+            print("| " + " | ".join(ligne) + " |")
+        manuels = [t.id for t in tests if t.manuel is not None]
+        duree = plan.duree_totale(execs, arguments.lien)
+        print()
+        print(f"{len(execs)} exécutions, durée {duree / 3600:.1f} h (pauses de 5 min incluses)")
+        if manuels:
+            print(f"Tests manuels (hors iperf) : {', '.join(manuels)}")
+        if any(row[5] == "CIR ?" for row in lignes):
+            print("Débit contractuel manquant pour certains tests : préciser --cir CLASSE=DEBIT")
+    logger.debug("commande_plan : {} exécutions", len(execs))
     return 0

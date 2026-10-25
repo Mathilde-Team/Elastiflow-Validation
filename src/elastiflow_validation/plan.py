@@ -40,8 +40,16 @@ PAUSE_S = 300  # pause entre deux tests (#4)
 PROTOCOLES = {"udp", "tcp"}
 _CHAMPS = {
     "id", "serie", "groupe", "protocole", "debit", "taille", "dscp", "tos", "duree", "volume",
-    "repetitions", "processus", "sampling", "prealable", "lab", "objectif", "manuel",
+    "repetitions", "processus", "sampling", "prealable", "lab", "objectif", "manuel", "attendu",
+    "port_destination",
 }  # fmt: skip
+# Contrôles de qos-audit (docs/CONTROLES.md) et gravités : verdicts attendus de la recette (#16).
+CONTROLES_QOS_AUDIT = {
+    "marking", "dscp_plan", "trust", "class_share", "port_range", "saturation", "class_overflow",
+    "counter_consistency", "congestion_ecn", "congestion_drops", "exit_balance",
+    "sampling_adequacy", "sampling_cost", "sampling_drift", "calibration",
+}  # fmt: skip
+GRAVITES = ("OK", "INCONCLUSIVE", "WARN", "CRIT")
 _DEBIT = re.compile(r"^(?P<v>\d+(?:[.,]\d+)?)\s*(?P<u>%\s*cir|%|[kKmMgG]?)$")
 _UNITES = {"": 1.0, "k": 1e3, "m": 1e6, "g": 1e9}
 
@@ -75,6 +83,8 @@ class Test:
     lab: bool = False
     objectif: str = ""
     manuel: str | None = None
+    attendu: tuple[tuple[str, str], ...] = ()  # verdicts qos-audit attendus (contrôle, gravité)
+    port_destination: int | None = None  # défaut : port du serveur iperf du banc
 
     @property
     def dscp(self) -> int | None:
@@ -145,6 +155,38 @@ def _entier(brut: dict, cle: str, ident: str, minimum: int = 1) -> int | None:
         raise ValueError(f"{ident} : {cle} doit être un entier ≥ {minimum} (lu : {v!r})")
     logger.debug("_entier : {}", v)
     return v
+
+
+def _attendu(brut: dict, ident: str) -> tuple[tuple[str, str], ...]:
+    """Verdicts qos-audit attendus : liste de ``controle:GRAVITE`` (scénarios de recette, #16)."""
+    logger.debug("_attendu : {}", ident)
+    valeurs = brut.get("attendu", [])
+    if not isinstance(valeurs, list):
+        logger.debug("_attendu : pas une liste")
+        raise ValueError(f"{ident} : attendu doit être une liste de « controle:GRAVITE »")
+    verdicts: list[tuple[str, str]] = []
+    for v in valeurs:
+        controle, _, gravite = str(v).partition(":")
+        if controle not in CONTROLES_QOS_AUDIT or gravite not in GRAVITES:
+            logger.debug("_attendu : verdict invalide {}", v)
+            raise ValueError(
+                f"{ident} : verdict attendu invalide {v!r} (contrôle qos-audit et "
+                f"gravité parmi {', '.join(GRAVITES)})"
+            )
+        verdicts.append((controle, gravite))
+    logger.debug("_attendu : {}", verdicts)
+    return tuple(verdicts)
+
+
+def _port(brut: dict, ident: str) -> int | None:
+    """Port de destination propre au test (ex. port RTP), sinon celui du banc."""
+    logger.debug("_port : {}", ident)
+    port = _entier(brut, "port_destination", ident)
+    if port is not None and port > 65535:
+        logger.debug("_port : hors plage")
+        raise ValueError(f"{ident} : port_destination hors plage (1 à 65535)")
+    logger.debug("_port : {}", port)
+    return port
 
 
 def _tos(brut: dict, ident: str) -> int | None:
@@ -240,6 +282,8 @@ def _test(brut: object, n: int) -> Test:
         prealable=brut.get("prealable"),
         lab=bool(brut.get("lab", False)),
         objectif=str(brut.get("objectif", "")),
+        attendu=_attendu(brut, ident),
+        port_destination=_port(brut, ident),
     )
     logger.debug("_test : {} ports {}", ident, test.ports)
     return test

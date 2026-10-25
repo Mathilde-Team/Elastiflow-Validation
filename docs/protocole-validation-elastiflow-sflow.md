@@ -578,6 +578,25 @@ Côté qos-audit, la même règle s'applique aux constats de conformité QoS : v
 
 ---
 
+### 8.7 Recette de qos-audit : série R
+
+Le banc sert aussi de recette à qos-audit (issue #16, Mathilde-Team/qos-audit#36) : chaque test de la série R
+injecte un défaut connu, et le champ `attendu` du plan YAML porte le verdict que qos-audit doit rendre sur la
+fenêtre du test (`controle:GRAVITE`, contrôles de `docs/CONTROLES.md` de qos-audit). Profil : `--profil recette`.
+
+| Test | Défaut injecté | Préalable | Verdict attendu |
+|---|---|---|---|
+| R1 | Voix : port RTP 20000 (`port_destination`), paquets IP de 200 o, TOS 0 | ACL voix de la politique couvrant le port 20000, serveur `iperf -s -u -p 20000` | `marking:CRIT` |
+| R2 | EF (46) depuis un port non fiable | Client branché sur un port non déclaré `trusted` | `trust:CRIT` |
+| R3 | DSCP 40 (CS5), hors plan | | `dscp_plan:WARN` |
+| R4 | EF à 150 % du lien (lab) | | `saturation:CRIT`, `class_overflow:WARN` |
+| R5 | Trafic sur la sortie de secours (lab) | Couper la sortie principale | `exit_balance:WARN` |
+| R6 | Sampling 1:4096 | Sortie du banc déclarée à 10 Mbit/s dans la politique | `sampling_adequacy:CRIT` (±112 % au plancher) |
+
+La série est en fin de plan : les ports sources des autres tests ne bougent pas. `efv plan` affiche les
+verdicts attendus (colonne `attendu`) ; la comparaison automatique avec la sortie de qos-audit relève de #6 et
+de qos-audit#36.
+
 ## 9. Partie lecture dans ElastiFlow
 
 ### 9.1 Principe

@@ -94,6 +94,9 @@ def test_commande_iperf_udp_tcp_volume():
     assert "-u" not in cmd and "-b" not in cmd and cmd[cmd.index("-n") + 1] == "1000000000"
     (q1,) = _execs("Q1-1")
     assert injection.commande_iperf(q1, 40030, banc)[-1] == "0xb8"
+    (r1,) = _execs("R1")  # port RTP propre au test (#16)
+    cmd = injection.commande_iperf(r1, r1.test.ports[0], banc)
+    assert cmd[cmd.index("-p") + 1] == "20000" and cmd[-1] == "0x00"
 
 
 def test_commande_iperf_refus():

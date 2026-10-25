@@ -153,6 +153,28 @@ def test_format_debit(bps, texte):
             "65535",
         ),
         ("version: 1\ntests: [", "illisible"),
+        (
+            "version: 1\ntests: [{id: X, protocole: tcp, debit: 5%, duree: 1, attendu: trust:x}]",
+            "liste",
+        ),
+        (
+            "version: 1\ntests: [{id: X, protocole: tcp, debit: 5%, duree: 1, attendu: [trust]}]",
+            "verdict attendu invalide",
+        ),
+        (
+            "version: 1\ntests: [{id: X, protocole: tcp, debit: 5%, duree: 1, attendu: [x:CRIT]}]",
+            "verdict attendu invalide",
+        ),
+        (
+            "version: 1\ntests: [{id: X, protocole: tcp, debit: 5%, duree: 1, "
+            "port_destination: -1}]",
+            "port_destination",
+        ),
+        (
+            "version: 1\ntests: [{id: X, protocole: tcp, debit: 5%, duree: 1, "
+            "port_destination: 70000}]",
+            "hors plage",
+        ),
     ],
 )
 def test_plan_invalide(entree, message):
@@ -184,12 +206,11 @@ def test_cli_plan_table(capsys):
     assert "| Q2-EF-150 | 1 | Q |  | udp | 3M | 472 | 0xb8 | 300s |" in sortie
     assert "| Q2-BF-150 | 1 | Q |  | udp | CIR ? |" in sortie
     assert (
-        "| D1 | 1 | D |  | udp | 1M | 972 | 0x00 | 600s | 40027 | nominal | tc qdisc add dev eth0"
-        in sortie
+        "| D1 | 1 | D |  | udp | 1M | 972 | 0x00 | 600s | 40027 | nominal |  | "
+        "tc qdisc add dev eth0" in sortie
     )
-    assert (
-        "| E1 | 1 | E |  | udp | 15M | 1472 | 0x00 | 60s |" in sortie and "| 1:8 | lab |" in sortie
-    )
+    assert "| E1 | 1 | E |  | udp | 15M | 1472 | 0x00 | 60s |" in sortie
+    assert "| 1:8 |  | lab |" in sortie
     assert "Tests manuels (hors iperf) : Q6, G1, G2, G3, G4, G5, G6" in sortie
     assert "préciser --cir" in sortie
 
@@ -217,6 +238,7 @@ def test_cli_plan_csv_complet(capsys):
         "600s",
         "40019-40026",
         "nominal",
+        "",
         "",
     ] in lignes
 
@@ -315,3 +337,33 @@ def test_cli_plan_profil(capsys, tmp_path):
     assert capsys.readouterr().out.count("\n") == 2
     assert cli.main(["plan", "--lien", "10M", "--plan", str(f), "--profil", "p"]) == 0
     assert "Tests manuels" not in capsys.readouterr().out
+
+
+def test_serie_r_recette(defaut):
+    """#16 : défauts connus pour la recette de qos-audit, verdicts attendus, ports inchangés."""
+    t = _par_id(defaut)
+    recette = plan.plan_par_defaut("recette")
+    assert [x.id for x in recette] == [f"R{i}" for i in range(1, 7)]
+    assert t["R1"].attendu == (("marking", "CRIT"),) and t["R1"].tos == 0
+    assert t["R1"].port_destination == 20000 and t["R2"].port_destination is None
+    assert t["R2"].attendu == (("trust", "CRIT"),) and t["R2"].tos == 0xB8 and t["R2"].prealable
+    assert t["R3"].attendu == (("dscp_plan", "WARN"),) and t["R3"].dscp == 40
+    assert t["R4"].attendu == (("saturation", "CRIT"), ("class_overflow", "WARN")) and t["R4"].lab
+    assert t["R5"].attendu == (("exit_balance", "WARN"),) and t["R5"].lab
+    assert t["R6"].attendu == (("sampling_adequacy", "CRIT"),) and t["R6"].sampling == 4096
+    assert all(x.attendu == () for x in defaut if x.serie != "R")
+    # en fin de plan : les ports des autres séries ne bougent pas
+    assert min(p for x in recette for p in x.ports) > max(
+        p for x in defaut if x.serie != "R" for p in x.ports
+    )
+
+
+def test_cli_plan_recette(capsys):
+    assert cli.main(["plan", "--lien", "10M", "--profil", "recette", "--format", "csv"]) == 0
+    lignes = list(csv.DictReader(io.StringIO(capsys.readouterr().out)))
+    assert [x["id"] for x in lignes] == [f"R{i}" for i in range(1, 7)]
+    assert lignes[3]["attendu"] == "saturation:CRIT, class_overflow:WARN"
+    assert lignes[0]["note"].startswith("port destination 20000 ; ")
+    assert cli.main(["plan", "--lien", "10M", "--profil", "recette"]) == 0
+    sortie = capsys.readouterr().out
+    assert "Recette qos-audit : comparer ses verdicts" in sortie and "Validé" not in sortie

@@ -672,6 +672,36 @@ erreur (%)    = (octets_elastiflow - octets_référence) / octets_référence ×
 conforme      = |erreur| <= borne_95
 ```
 
+### 10.4 Périmètre de validité et revalidation
+
+Une validation porte sur **un lien, un exporteur et une chaîne de collecte donnés**. Elle ne vaut pas, telle quelle,
+pour N sites ni pour d'autres modèles. Le rapport et VAL-ELASTIFLOW-001 indiquent donc le périmètre exact :
+
+- modèle, version Comware (firmware) et IP d'agent de **chaque exporteur** testé ;
+- interface de mesure et **sens d'échantillonnage** (entrée seule, ou entrée et sortie) ;
+- sampling-rate validé par interface ;
+- version d'ElastiFlow (Unified Flow Collector) et du stockage interrogé (Elasticsearch ou OpenSearch) ;
+- date des tests.
+
+Une autre interface du même exporteur, ou un autre exporteur du même modèle et de la même version, est couvert
+s'il est configuré à l'identique (même sampling-rate, même sens, mêmes paramètres sFlow du chapitre 5).
+
+Conditions de **revalidation** :
+
+| Changement | Revalidation |
+| --- | --- |
+| Mise à jour du firmware Comware d'un exporteur | allégée |
+| Mise à jour d'ElastiFlow ou de son stockage (version majeure ou mineure) | allégée |
+| Nouveau sampling-rate ou changement de sens d'échantillonnage | allégée |
+| Nouveau modèle d'exporteur (ou nouvelle famille Comware) | complète |
+| Nouveau type de circuit ou nouvel opérateur (QoS) | complète pour la QoS (section 8), allégée sinon |
+| Changement de schéma ElastiFlow constaté (champ absent ou renommé) | allégée, P4 en premier |
+
+La revalidation **allégée** rejoue P4 à P7 (champs, calibrage à 1:1, facteur d'échantillonnage, délai d'agrégation)
+et A2 (justesse des volumes) ; elle prend environ 2 h. La revalidation **complète** reprend le protocole entier
+(planning en section 11). Le contrôle correspondant côté qos-audit (calibration par exporteur) est suivi dans
+Mathilde-Team/qos-audit#35.
+
 ---
 
 ## 11. Planning indicatif

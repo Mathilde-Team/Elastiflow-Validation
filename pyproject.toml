@@ -1,0 +1,40 @@
+# Projet Python d'exemple du socle Mathilde-Team. À adapter (nom, dépendances,
+# paquet mesuré) ; garder les sections [tool.coverage.*] : le seuil de
+# couverture est déclaré ici et nulle part ailleurs (SOCLE.md §4).
+[project]
+name = "modele-depot"
+version = "0.0.0"
+description = "Modèle de dépôt Mathilde-Team : socle qualité prêt à l'emploi"
+requires-python = ">=3.12"
+dependencies = [
+    # Journalisation (SOCLE §8) : loguru pour tout le Python de l'équipe.
+    "loguru>=0.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]
+addopts = "-ra"
+
+[tool.coverage.run]
+# Couverture des branches obligatoire (SOCLE.md §4).
+branch = true
+# Code mesuré : à remplacer par le paquet du dépôt (par exemple ["src/mon_paquet"]).
+source = ["scripts"]
+
+[tool.coverage.report]
+# Seuil bloquant de l'équipe (décision du 21/10/2026, Mathilde-Team/.github#9).
+# Dépôt existant sous 95 % : fixer d'abord la mesure du jour, puis relever à
+# chaque PR de tests jusqu'à 95 (palier et date cible dans l'issue de suivi).
+fail_under = 95
+show_missing = true
+skip_covered = false

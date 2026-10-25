@@ -11,7 +11,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 
 | Étape | Commande | Issue |
 | --- | --- | --- |
-| Calculs (sampling-rate, borne à 95 %, DSCP/TOS, tailles) | `efv sampling` | #2 |
+| Calculs (sampling-rate, borne à 95 %, DSCP/TOS, tailles) : disponible | `efv sampling` | #2 |
 | Plan de tests (phase 0, séries A à E, QoS, G1 à G6) | `efv plan` | #3 |
 | Injection iperf2 et relevé nft vers `resultats.csv` | `efv injecter` | #4 |
 | Lecture ElastiFlow (Elasticsearch / OpenSearch) | `efv lire` | #5 |
@@ -24,6 +24,18 @@ uv sync --locked
 uv run efv --help
 uv run efv --debug ...      # traces de debug (ou SOCLE_DEBUG=1)
 ```
+
+`efv sampling` sans argument rejoue le tableau 4.2 du protocole ; avec des débits, il dimensionne ces
+liens (débit effectif du circuit). Les options suivent le §4.3 :
+
+```bash
+uv run efv sampling                         # tableau 4.2 (plancher 5 %, 5 min, 1500 o, erreur 5 %)
+uv run efv sampling 10M 1G --fenetre 1800   # 30 min d'analyse
+uv run efv sampling 20M --plancher 1 --erreur 10 --taille 500
+```
+
+Les formules (borne `196/√n`, n cible `(196/e)²`, détection `1 − exp(−n)`, DSCP ↔ TOS, taille IP ↔
+`-l` UDP ↔ trame Ethernet) sont dans `elastiflow_validation.calcul`.
 
 ## Développement
 

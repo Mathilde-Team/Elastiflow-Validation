@@ -171,7 +171,7 @@ def test_comparer_administrateurs(admins, niveau, ecart):
 
 
 def test_comparer_sans_checks_ignore_administrateurs():
-    """Règle sans checks requis : le niveau d'application n'est pas lisible, il n'est pas comparé."""
+    """Règle sans checks requis : niveau d'application illisible, donc non comparé."""
     assert cbp.comparer({"enforce_admins": True}, branche_api(niveau="off")) == []
     assert cbp.comparer({}, {"protected": True}) == []
 

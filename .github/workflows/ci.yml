@@ -34,6 +34,9 @@ jobs:
       - name: Syntaxe des scripts Python
         run: uv run --no-project python -m py_compile scripts/*.py
 
+      - name: Lint Python (ruff check, version figée dans uv.lock)
+        run: make lint
+
       # Tests et couverture (SOCLE.md §4) : seuil bloquant de 95 %, branches
       # comprises, déclaré une seule fois dans pyproject.toml
       # ([tool.coverage.report] fail_under, [tool.coverage.run] branch) ; la

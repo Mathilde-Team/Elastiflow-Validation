@@ -36,10 +36,11 @@ Hors périmètre : la configuration de production des équipements (hors modific
 | Serveur iperf | Hôte, OS, version d'iperf, adresse IP : |
 | Équipement A (site émetteur) | Modèle, version Comware, IP d'agent sFlow, interface de mesure : |
 | Équipement B (site récepteur) | Modèle, version Comware, IP d'agent sFlow, interface de mesure : |
-| ElastiFlow | Version, IP du collecteur, port sFlow, index interrogé : |
+| ElastiFlow | Version du collecteur (Unified Flow Collector), version du stockage (Elasticsearch / OpenSearch), IP du collecteur, port sFlow, index interrogé : |
 | Circuit WAN | Opérateur, débit effectif du circuit (Mbit/s) : |
 | Source NTP | Serveur, écart constaté entre équipements : |
 | Sens d'échantillonnage Comware | Entrée seule / entrée et sortie : |
+| Dates des tests | Début, fin : |
 
 ## 4. Sampling-rate par interface
 
@@ -265,6 +266,19 @@ Octets de référence : compteurs nft du client, dans la base établie en P5. Er
 | Autres éléments sFlow (G1 à G6) | / 6 |  |
 
 **Sampling-rate retenu** : voir le tableau de la section 4, colonne « Sampling validé ».
+
+**Périmètre de validité** (protocole 10.4) : le verdict ne vaut que pour la configuration ci-dessous. Tout
+changement listé dans le tableau de revalidation du protocole impose une revalidation allégée (P4 à P7 + A2) ou
+complète.
+
+| Élément | Valeur validée |
+| --- | --- |
+| Exporteurs (modèle, version Comware, IP d'agent) |  |
+| Interfaces et sens d'échantillonnage |  |
+| Sampling-rate par interface |  |
+| ElastiFlow (collecteur) et stockage : versions |  |
+| Date des tests |  |
+| Revalidation | ☐ Initiale ☐ Allégée (P4 à P7 + A2) ☐ Complète — motif : |
 
 **Verdict**
 

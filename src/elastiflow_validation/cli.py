@@ -1,13 +1,14 @@
 """Ligne de commande ``efv``.
 
-Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3). Les suivantes
-(injecter, lire, rapport) sont ajoutées module par module ; voir les issues du dépôt.
+Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3), ``injecter`` (#4). Les suivantes
+(lire, rapport) sont ajoutées module par module ; voir les issues du dépôt.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
 import math
 import sys
 from collections.abc import Sequence
@@ -15,7 +16,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from elastiflow_validation import __version__, calcul, plan
+from elastiflow_validation import __version__, calcul, injection, plan
 from elastiflow_validation.journal import configurer
 
 
@@ -31,6 +32,7 @@ def construire_parseur() -> argparse.ArgumentParser:
     sous = parseur.add_subparsers(dest="commande", metavar="COMMANDE")
     _ajouter_sampling(sous)
     _ajouter_plan(sous)
+    _ajouter_injecter(sous)
     logger.debug("parseur construit")
     return parseur
 
@@ -179,14 +181,9 @@ def classe_debit(texte: str) -> tuple[str, float]:
     return resultat
 
 
-def _ajouter_plan(sous: argparse._SubParsersAction) -> None:
-    """Sous-commande ``efv plan`` (§7.8 à §8.3 du protocole)."""
-    logger.debug("ajout de la sous-commande plan")
-    p = sous.add_parser(
-        "plan",
-        help="plan de tests converti en débits absolus pour un lien (§7.8 à §8.3)",
-        description="Charge et valide le plan YAML, puis affiche chaque exécution pour ce lien.",
-    )
+def _options_plan(p: argparse.ArgumentParser) -> None:
+    """Options communes à ``efv plan`` et ``efv injecter`` : lien, plan, profil, CIR."""
+    logger.debug("_options_plan : {}", p.prog)
     p.add_argument("--lien", type=debit, required=True, help="débit effectif du lien (10M, 1G…)")
     p.add_argument("--plan", type=Path, help="plan YAML (défaut : plan du protocole)")
     p.add_argument(
@@ -201,6 +198,35 @@ def _ajouter_plan(sous: argparse._SubParsersAction) -> None:
         metavar="CLASSE=DEBIT",
         help="débit contractuel d'une classe, pour Q2 et Q4 (répétable : --cir EF=2M)",
     )
+    logger.debug("_options_plan : ajoutées")
+
+
+def _charger(arguments: argparse.Namespace) -> tuple[list[plan.Test], list[plan.Execution]]:
+    """Plan (fichier ou défaut, profil éventuel) et ses exécutions pour le lien demandé.
+
+    Raises:
+        OSError: Plan illisible.
+        ValueError: Plan ou profil invalide.
+    """
+    logger.debug("_charger : plan={} profil={}", arguments.plan, arguments.profil)
+    if arguments.plan:
+        tests = plan.charger_plan(arguments.plan, arguments.profil)
+    else:
+        tests = plan.plan_par_defaut(arguments.profil)
+    execs = plan.executions(tests, arguments.lien, dict(arguments.cir))
+    logger.debug("_charger : {} exécutions", len(execs))
+    return tests, execs
+
+
+def _ajouter_plan(sous: argparse._SubParsersAction) -> None:
+    """Sous-commande ``efv plan`` (§7.8 à §8.3 du protocole)."""
+    logger.debug("ajout de la sous-commande plan")
+    p = sous.add_parser(
+        "plan",
+        help="plan de tests converti en débits absolus pour un lien (§7.8 à §8.3)",
+        description="Charge et valide le plan YAML, puis affiche chaque exécution pour ce lien.",
+    )
+    _options_plan(p)
     p.add_argument(
         "--format", choices=("table", "csv"), default="table", help="sortie (défaut table)"
     )
@@ -263,11 +289,7 @@ def commande_plan(arguments: argparse.Namespace) -> int:
     """Affiche le plan converti pour le lien demandé (table Markdown ou CSV)."""
     logger.debug("commande_plan : {}", arguments)
     try:
-        if arguments.plan:
-            tests = plan.charger_plan(arguments.plan, arguments.profil)
-        else:
-            tests = plan.plan_par_defaut(arguments.profil)
-        execs = plan.executions(tests, arguments.lien, dict(arguments.cir))
+        tests, execs = _charger(arguments)
     except (OSError, ValueError) as exc:
         logger.error("plan : {}", exc)
         return 2
@@ -295,4 +317,99 @@ def commande_plan(arguments: argparse.Namespace) -> int:
         if any(row[5] == "CIR ?" for row in lignes):
             print("Débit contractuel manquant pour certains tests : préciser --cir CLASSE=DEBIT")
     logger.debug("commande_plan : {} exécutions", len(execs))
+    return 0
+
+
+def _ajouter_injecter(sous: argparse._SubParsersAction) -> None:
+    """Sous-commande ``efv injecter`` (§7.7 du protocole)."""
+    logger.debug("ajout de la sous-commande injecter")
+    p = sous.add_parser(
+        "injecter",
+        help="injection iperf2 et relevé nft vers resultats.csv (§7.7)",
+        description=(
+            "Déroule le plan : compteur nft par port source, iperf2, horodatage, une ligne par "
+            "test dans resultats.csv, pause entre deux tests. À lancer sur le client du banc."
+        ),
+    )
+    _options_plan(p)
+    p.add_argument(
+        "--test",
+        action="append",
+        default=[],
+        metavar="SELECTEUR",
+        help="restreint aux tests désignés : identifiant, motif (A*) ou groupe (répétable)",
+    )
+    banc = injection.Banc()
+    p.add_argument("--serveur", default=banc.serveur, help=f"serveur iperf (défaut {banc.serveur})")
+    p.add_argument("--client", default=banc.client, help=f"IP source du client ({banc.client})")
+    p.add_argument(
+        "--port-destination",
+        type=int,
+        default=banc.port_destination,
+        help=f"port du serveur iperf (défaut {banc.port_destination})",
+    )
+    p.add_argument(
+        "--sortie",
+        type=Path,
+        default=Path("resultats.csv"),
+        help="fichier des résultats (complété)",
+    )
+    p.add_argument(
+        "--pause", type=float, default=plan.PAUSE_S, help="pause entre deux tests, en s (300)"
+    )
+    p.add_argument("--lab", action="store_true", help="inclut les tests réservés au laboratoire")
+    p.add_argument("--dry-run", action="store_true", help="affiche les commandes sans les exécuter")
+    p.set_defaults(action=commande_injecter)
+    logger.debug("sous-commande injecter ajoutée")
+
+
+def _selectionner(execs: list[plan.Execution], selecteurs: list[str]) -> list[plan.Execution]:
+    """Exécutions des tests désignés (identifiant, motif ou groupe) ; toutes sans sélecteur.
+
+    Raises:
+        ValueError: Sélecteur qui ne désigne aucun test.
+    """
+    logger.debug("_selectionner : {}", selecteurs)
+    if not selecteurs:
+        logger.debug("_selectionner : tout le plan")
+        return execs
+    choisies: list[plan.Execution] = []
+    for sel in selecteurs:
+        trouvees = [e for e in execs if fnmatch.fnmatchcase(e.test.id, sel) or e.test.groupe == sel]
+        if not trouvees:
+            logger.debug("_selectionner : {} sans test", sel)
+            raise ValueError(f"--test {sel} : aucun test correspondant")
+        choisies += trouvees
+    retenues = [e for e in execs if e in choisies]
+    logger.debug("_selectionner : {} exécutions", len(retenues))
+    return retenues
+
+
+def commande_injecter(arguments: argparse.Namespace) -> int:
+    """Injecte le plan (ou sa sélection) et complète ``resultats.csv``."""
+    logger.debug("commande_injecter : {}", arguments)
+    banc = injection.Banc(arguments.serveur, arguments.client, arguments.port_destination)
+    systeme = injection.SystemeReel()
+    try:
+        _, execs = _charger(arguments)
+        execs = _selectionner(execs, arguments.test)
+        n = injection.injecter(
+            execs,
+            arguments.sortie,
+            systeme,
+            banc=banc,
+            pause_s=arguments.pause,
+            lab=arguments.lab,
+            dry_run=arguments.dry_run,
+        )
+    except (OSError, ValueError) as exc:
+        logger.error("injecter : {}", exc)
+        return 2
+    except RuntimeError as exc:
+        logger.error("injection interrompue : {}", exc)
+        return 1
+    finally:
+        systeme.fermer()
+    print(f"{n} lancement(s) {'simulé(s)' if arguments.dry_run else 'terminé(s)'}")
+    logger.debug("commande_injecter : {} lancement(s)", n)
     return 0

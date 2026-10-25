@@ -377,6 +377,10 @@ echo "T$ID  $START -> $END  paquets=$PKTS  octets_IP=$BYTES"
 
 Le fichier `resultats.csv` contient une ligne par test : identifiant, paramètres, début et fin en epoch, paquets et octets IP réellement émis. C'est la **référence** de l'analyse (section 10).
 
+L'outil du dépôt automatise ce script pour tout le plan : `efv injecter` (mêmes commandes iperf2 et nft, groupes
+lancés ensemble, pause de 5 min, confirmation de l'opérateur pour les changements de sampling et les préalables,
+`--dry-run` pour relire les commandes avant de lancer).
+
 ### 7.8 Matrice de tests
 
 Les débits sont donnés **en pourcentage du débit effectif du lien** ; l'exemple chiffré est celui d'un lien de **10 Mbit/s**. Le sampling de l'interface suit le tableau 4.2 (1:8 pour 10 Mbit/s).

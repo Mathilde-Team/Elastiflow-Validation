@@ -199,3 +199,54 @@ def test_tailles_limites():
         calcul.charge_udp(28)
     with pytest.raises(ValueError):
         calcul.taille_ip_de_charge(0)
+
+
+# #10 : erreur sur les octets avec des tailles de paquets dispersées.
+def test_cv_tailles():
+    assert calcul.cv_tailles([1000, 1000, 1000]) == 0
+    assert calcul.cv_tailles([64, 576, 1500]) == pytest.approx(0.833, abs=1e-3)
+    # pondération : 2 paquets de 64 o pour 1 de 1500 o, comme la liste développée
+    assert calcul.cv_tailles([64, 1500], [2, 1]) == pytest.approx(calcul.cv_tailles([64, 64, 1500]))
+    for tailles, poids in (([], None), ([64], [1, 2]), ([64], [-1]), ([64], [0]), ([0, 64], None)):
+        with pytest.raises(ValueError):
+            calcul.cv_tailles(tailles, poids)
+
+
+def test_erreur_95_octets():
+    assert calcul.erreur_95_octets(1537, 0) == pytest.approx(calcul.erreur_95(1537))
+    # mélange égal 64/576/1500 o : erreur × 1,30, la marge haute de 20-30 % du protocole
+    cv = calcul.cv_tailles([64, 576, 1500])
+    assert calcul.erreur_95_octets(1537, cv) / calcul.erreur_95(1537) == pytest.approx(
+        1.30, abs=0.005
+    )
+    assert calcul.erreur_95_octets(0, cv) == math.inf
+    with pytest.raises(ValueError):
+        calcul.erreur_95_octets(1537, -0.1)
+
+
+def test_n_cible_octets():
+    assert calcul.n_cible_octets() == calcul.n_cible() == 1537
+    assert calcul.n_cible_octets(5, calcul.cv_tailles([64, 576, 1500])) == 2603
+    assert calcul.n_cible_octets(5, math.sqrt(0.44)) == 2213  # marge de 20 % sur l'erreur
+    # l'erreur visée est atteinte avec n cible échantillons
+    for cv in (0.3, 0.83, 1.5):
+        assert calcul.erreur_95_octets(calcul.n_cible_octets(5, cv), cv) <= 5
+    for erreur, cv in ((0, 0), (5, -1)):
+        with pytest.raises(ValueError):
+            calcul.n_cible_octets(erreur, cv)
+
+
+def test_sampling_avec_cv():
+    cv = calcul.cv_tailles([64, 576, 1500])
+    ligne = calcul.dimensionner(10e6, cv=cv)
+    assert ligne.rate == 4  # 12 500 paquets / 2 603 = 4,8 -> 1:4 (1:8 sans CV)
+    assert ligne.erreur_pct is not None and ligne.erreur_pct <= 5
+    assert calcul.sampling_rate(1e9, cv=cv) == 256  # 512 sans CV
+
+
+def test_cli_cv(capsys):
+    assert cli.main(["sampling", "10M", "--cv", "0.833"]) == 0
+    sortie = capsys.readouterr().out.splitlines()
+    assert sortie[0] == "n cible : 2603 échantillons (erreur 5 % à 95 %, CV 0.833)"
+    assert sortie[3].startswith("| 10 | 500 | 1:4 | 3125 | 4,6 % |")
+    assert cli.main(["sampling", "10M", "--cv", "-1"]) == 2

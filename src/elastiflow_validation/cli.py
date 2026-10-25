@@ -102,6 +102,12 @@ def _ajouter_sampling(sous: argparse._SubParsersAction) -> None:
         default=100,
         help="taille IP pour le coût, lien saturé (défaut 100)",
     )
+    p.add_argument(
+        "--cv",
+        type=float,
+        default=0.0,
+        help="CV de la taille des paquets : erreur sur les octets du trafic réel (défaut 0)",
+    )
     p.set_defaults(action=commande_sampling)
     logger.debug("sous-commande sampling ajoutée")
 
@@ -134,6 +140,7 @@ def commande_sampling(arguments: argparse.Namespace) -> int:
                 arguments.taille,
                 arguments.erreur,
                 arguments.taille_cout,
+                arguments.cv,
             )
             for d in debits
         ]
@@ -141,8 +148,8 @@ def commande_sampling(arguments: argparse.Namespace) -> int:
         logger.error("sampling : {}", exc)
         return 2
     print(
-        f"n cible : {calcul.n_cible(arguments.erreur)} échantillons "
-        f"(erreur {arguments.erreur:g} % à 95 %)"
+        f"n cible : {calcul.n_cible_octets(arguments.erreur, arguments.cv)} échantillons "
+        f"(erreur {arguments.erreur:g} % à 95 %{f', CV {arguments.cv:g}' if arguments.cv else ''})"
     )
     print(
         "| Débit du lien (Mbit/s) | Plancher (kbit/s) | Sampling-rate | Échantillons au plancher "

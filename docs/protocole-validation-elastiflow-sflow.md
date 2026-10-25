@@ -53,7 +53,20 @@ Pour viser une erreur de 5 % :
 n = (196 / 5)² ≈ 1 537 échantillons par fenêtre
 ```
 
-Cette formule porte sur le **comptage de paquets**. Pour des **octets** avec des tailles de paquets variables (trafic réel), l'erreur est plus grande : prévoir 20 à 30 % de marge, soit viser plutôt 2 000 échantillons.
+Cette formule porte sur le **comptage de paquets**. Elle vaut aussi pour les **octets** tant que tous les paquets ont la même taille (iperf avec `-l` fixe). Avec des tailles variables (trafic réel), l'estimation des octets ajoute la dispersion des tailles : si CV est le coefficient de variation de la taille des paquets (écart type / moyenne),
+
+```
+erreur octets (%) ≈ 196 × √((1 + CV²) / n)
+n octets = (196 / e)² × (1 + CV²)
+```
+
+| Trafic | CV | Erreur × √(1 + CV²) | n pour 5 % |
+| --- | --- | --- | --- |
+| Taille fixe (iperf `-l`) | 0 | × 1,00 | 1 537 |
+| Marge de 20 % sur l'erreur | 0,66 | × 1,20 | 2 213 |
+| Mélange égal 64 / 576 / 1 500 o | 0,83 | × 1,30 | 2 603 |
+
+La marge de 20 à 30 % sur l'erreur correspond donc à un CV de 0,66 à 0,83 et à **2 200 à 2 600 échantillons** (et non 2 000, qui ne donne que 14 % de marge). Le CV d'un lien se mesure sur sa distribution de tailles (`efv sampling --cv <CV>` en tient compte) ; la série de vérification et la marge mesurée publiée dans le rapport sont suivies dans l'issue #10.
 
 Cas particulier : à **1:1**, tous les paquets sont échantillonnés, le comptage est exhaustif et la formule ne s'applique plus (sous réserve que le matériel supporte ce taux et que l'export ne perde rien).
 

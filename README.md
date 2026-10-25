@@ -32,9 +32,10 @@ liens (débit effectif du circuit). Les options suivent le §4.3 :
 uv run efv sampling                         # tableau 4.2 (plancher 5 %, 5 min, 1500 o, erreur 5 %)
 uv run efv sampling 10M 1G --fenetre 1800   # 30 min d'analyse
 uv run efv sampling 20M --plancher 1 --erreur 10 --taille 500
+uv run efv sampling 10M --cv 0.83                 # erreur sur les octets, tailles 64/576/1500 o
 ```
 
-Les formules (borne `196/√n`, n cible `(196/e)²`, détection `1 − exp(−n)`, DSCP ↔ TOS, taille IP ↔
+Les formules (borne `196/√n`, n cible `(196/e)²`, erreur sur les octets `196·√((1+CV²)/n)`, détection `1 − exp(−n)`, DSCP ↔ TOS, taille IP ↔
 `-l` UDP ↔ trame Ethernet) sont dans `elastiflow_validation.calcul`.
 
 ## Développement

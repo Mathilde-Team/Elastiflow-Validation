@@ -89,7 +89,7 @@ Le sampling-rate se règle **par interface**. Le débit à retenir est le débit
 | P6 | Facteur d'échantillonnage appliqué : même total à 1:1 et à 1:8 |  | ☐ OK ☐ KO |
 | P7 | Délai d'agrégation d'ElastiFlow mesuré (minutes entre la fin du flux et l'enregistrement) |  | ☐ OK ☐ KO |
 | P8 | Export sFlow hors du lien testé, ou classé en BE |  | ☐ OK ☐ KO |
-| P9 | Contrat opérateur relu : correspondance des classes, débit par classe, comportement hors profil |  | ☐ OK ☐ KO |
+| P9 | Confirmation écrite de l'opérateur reçue (référence et date) : correspondance des classes, sens de « EF 45 », CIR par classe, hors profil, DSCP inconnus, classe sous BF (protocole 8.6). KO : résultats Q « observés, non contractuels » |  | ☐ OK ☐ KO |
 
 ## 7. Fiches de test
 
@@ -136,7 +136,7 @@ A2, A3 et A5 sont répétés trois fois. Les séries A1 à A3 sont aussi rejoué
 
 ### 7.5 QoS : classes de l'opérateur
 
-Correspondance des classes à confirmer avec l'opérateur avant les tests. EF vaut DSCP 46 (octet TOS 0xB8) ; si l'opérateur impose réellement le DSCP 45, l'octet TOS est 0xB4.
+Correspondance des classes à confirmer **par écrit** avec l'opérateur avant les tests (P9, protocole 8.6). Sans cette confirmation, les résultats de cette section sont **observés, non contractuels**. Référence de la confirmation : \_\_\_\_\_\_\_\_. EF vaut DSCP 46 (octet TOS 0xB8) ; si l'opérateur impose réellement le DSCP 45, l'octet TOS est 0xB4.
 
 **Q1 : marquage conservé (10 min par valeur, 5 % du lien, paquets IP de 500 o)**
 
@@ -261,7 +261,7 @@ Octets de référence : compteurs nft du client, dans la base établie en P5. Er
 | Série B : taille des paquets | / 5 |  |
 | Série C : TCP | / 3 |  |
 | Séries D et E : répétition et saturation | / 3 |  |
-| QoS (Q1 à Q6) |  |  |
+| QoS (Q1 à Q6) |  | ☐ Contractuel (P9 OK) ☐ Observé, non contractuel (P9 KO) |
 | Autres éléments sFlow (G1 à G6) | / 6 |  |
 
 **Sampling-rate retenu** : voir le tableau de la section 4, colonne « Sampling validé ».
@@ -271,6 +271,9 @@ Octets de référence : compteurs nft du client, dans la base établie en P5. Er
 - ☐ Validé : tous les critères d'acceptation sont atteints.
 - ☐ Validé avec réserves : écarts listés en section 9, sans impact sur l'usage prévu.
 - ☐ Non validé : un ou plusieurs critères essentiels ne sont pas atteints, actions correctives en section 9.
+
+Sans confirmation écrite de l'opérateur (P9 KO), le verdict ne porte pas sur la QoS : les résultats Q sont
+rapportés comme « observés, non contractuels ».
 
 **Recommandations** :
 

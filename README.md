@@ -12,7 +12,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 | Étape | Commande | Issue |
 | --- | --- | --- |
 | Calculs (sampling-rate, borne à 95 %, DSCP/TOS, tailles) : disponible | `efv sampling` | #2 |
-| Plan de tests (phase 0, séries A à E, QoS, G1 à G6) | `efv plan` | #3 |
+| Plan de tests (phase 0, séries A à E, QoS, G1 à G6) : disponible | `efv plan` | #3 |
 | Injection iperf2 et relevé nft vers `resultats.csv` | `efv injecter` | #4 |
 | Lecture ElastiFlow (Elasticsearch / OpenSearch) | `efv lire` | #5 |
 | Comparaison, verdict et document de validation rempli | `efv rapport` | #6 |
@@ -37,6 +37,17 @@ uv run efv sampling 10M --cv 0.83                 # erreur sur les octets, taill
 
 Les formules (borne `196/√n`, n cible `(196/e)²`, erreur sur les octets `196·√((1+CV²)/n)`, détection `1 − exp(−n)`, DSCP ↔ TOS, taille IP ↔
 `-l` UDP ↔ trame Ethernet) sont dans `elastiflow_validation.calcul`.
+
+`efv plan` déroule le plan YAML (`src/elastiflow_validation/plans/protocole.yaml` par défaut) pour
+un lien donné : débit absolu (`-b`), charge UDP (`-l`), octet TOS (`-S`), durée ou volume, ports
+sources (`40000 + N`, dans l'ordre du fichier), sampling attendu et durée totale estimée. Les débits
+Q2 sont exprimés en % du débit contractuel de la classe, à fournir avec `--cir` :
+
+```bash
+uv run efv plan --lien 10M --cir EF=2M --cir AF41=3M --cir D1=2M --cir BF=3M
+uv run efv plan --lien 1G --format csv > plan.csv
+uv run efv plan --lien 10M --plan mon-plan.yaml
+```
 
 ## Développement
 

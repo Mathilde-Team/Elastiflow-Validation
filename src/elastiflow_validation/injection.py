@@ -60,6 +60,9 @@ COLONNES = (
     "fin",
     "paquets",
     "octets",
+    "client",
+    "serveur",
+    "port_destination",
 )
 
 
@@ -253,8 +256,11 @@ def lire_compteurs(json_nft: str) -> dict[str, tuple[int, int, int]]:
     return compteurs
 
 
-def _ligne(e: plan.Execution, debut: int, fin: int, paquets: int, octets: int) -> list[str]:
-    """Ligne de ``resultats.csv`` d'une exécution (ordre de ``COLONNES``)."""
+def _ligne(
+    e: plan.Execution, debut: int, fin: int, paquets: int, octets: int, banc: Banc
+) -> list[str]:
+    """Ligne de ``resultats.csv`` d'une exécution (ordre de ``COLONNES``) ; le banc donne la clé
+    de lecture dans ElastiFlow (``efv lire``)."""
     logger.debug("_ligne : {}#{}", e.test.id, e.repetition)
     t = e.test
     ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
@@ -263,6 +269,7 @@ def _ligne(e: plan.Execution, debut: int, fin: int, paquets: int, octets: int) -
         "" if t.taille is None else str(t.taille), f"{t.tos or 0:#04x}", ports,
         "nominal" if t.sampling is None else f"1:{t.sampling}",
         str(debut), str(fin), str(paquets), str(octets),
+        banc.client, banc.serveur, str(t.port_destination or banc.port_destination),
     ]  # fmt: skip
     logger.debug("_ligne : {} paquets, {} octets", paquets, octets)
     return ligne
@@ -319,7 +326,7 @@ def _executer_lancement(
             handle, p, o = valeurs
             paquets, octets = paquets + p, octets + o
             systeme.executer(["nft", "delete", "rule", *TABLE, CHAINE, "handle", str(handle)])
-        lignes.append(_ligne(e, debut, fin, paquets, octets))
+        lignes.append(_ligne(e, debut, fin, paquets, octets, banc))
     if any(codes) or manquants:
         logger.debug("_executer_lancement : échec (codes {}, manquants {})", codes, manquants)
         raise RuntimeError(

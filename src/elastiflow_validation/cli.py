@@ -1,7 +1,7 @@
 """Ligne de commande ``efv``.
 
-Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3), ``injecter`` (#4). Les suivantes
-(lire, rapport) sont ajoutées module par module ; voir les issues du dépôt.
+Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3), ``injecter`` (#4), ``lire`` (#5).
+La suivante (rapport) est ajoutée module par module ; voir les issues du dépôt.
 """
 
 from __future__ import annotations
@@ -10,13 +10,15 @@ import argparse
 import csv
 import fnmatch
 import math
+import os
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
 from loguru import logger
 
-from elastiflow_validation import __version__, calcul, injection, plan
+from elastiflow_validation import __version__, calcul, injection, lecture, plan
 from elastiflow_validation.journal import configurer
 
 
@@ -33,6 +35,7 @@ def construire_parseur() -> argparse.ArgumentParser:
     _ajouter_sampling(sous)
     _ajouter_plan(sous)
     _ajouter_injecter(sous)
+    _ajouter_lire(sous)
     logger.debug("parseur construit")
     return parseur
 
@@ -420,4 +423,74 @@ def commande_injecter(arguments: argparse.Namespace) -> int:
         systeme.fermer()
     print(f"{n} lancement(s) {'simulé(s)' if arguments.dry_run else 'terminé(s)'}")
     logger.debug("commande_injecter : {} lancement(s)", n)
+    return 0
+
+
+def _ajouter_lire(sous: argparse._SubParsersAction) -> None:
+    """Sous-commande ``efv lire`` (§9 du protocole)."""
+    logger.debug("_ajouter_lire : entrée")
+    p = sous.add_parser(
+        "lire",
+        help="lecture dans ElastiFlow des tests de resultats.csv vers lectures.csv (§9)",
+        description=(
+            "Une requête d'agrégation par test : sommes brutes d'octets et de paquets par "
+            "exportateur, sommes hors minutes de bord, sampling-rate et DSCP lus. URL et "
+            "identifiants dans l'environnement : EFV_ES_URL, EFV_ES_API_KEY ou EFV_ES_USER et "
+            "EFV_ES_PASSWORD, EFV_ES_CA (facultatif)."
+        ),
+    )
+    p.add_argument(
+        "--resultats", type=Path, default=Path("resultats.csv"), help="sortie d'injecter"
+    )
+    p.add_argument("--sortie", type=Path, default=Path("lectures.csv"), help="fichier écrit")
+    p.add_argument("--index", default=lecture.INDEX_DEFAUT, help="index ou motif des flux")
+    p.add_argument("--champs", type=Path, help="YAML « clé: nom de champ » (§9.2, P4)")
+    p.add_argument(
+        "--delai",
+        type=int,
+        default=lecture.DELAI_S,
+        help=f"délai d'agrégation après la fin du test, en s ({lecture.DELAI_S}, P7)",
+    )
+    p.add_argument(
+        "--bord", type=int, default=lecture.BORD_S, help="bord exclu de la fenêtre utile, en s"
+    )
+    banc = injection.Banc()
+    p.add_argument("--serveur", default=banc.serveur, help="à défaut de colonne serveur")
+    p.add_argument("--client", default=banc.client, help="à défaut de colonne client")
+    p.add_argument(
+        "--port-destination",
+        type=int,
+        default=banc.port_destination,
+        help="à défaut de colonne port_destination",
+    )
+    p.set_defaults(action=commande_lire)
+    logger.debug("_ajouter_lire : sortie")
+
+
+def commande_lire(arguments: argparse.Namespace, client: lecture.Client | None = None) -> int:
+    """Lit dans ElastiFlow les tests dont le délai d'agrégation est écoulé."""
+    logger.debug("commande_lire : entrée {} -> {}", arguments.resultats, arguments.sortie)
+    banc = injection.Banc(arguments.serveur, arguments.client, arguments.port_destination)
+    try:
+        champs = lecture.charger_champs(arguments.champs)
+        client = client or lecture.ClientHttp(lecture.connexion_depuis_env(os.environ))
+        n = lecture.lire(
+            arguments.resultats,
+            arguments.sortie,
+            client,
+            index=arguments.index,
+            champs=champs,
+            banc=banc,
+            delai_s=arguments.delai,
+            bord_s=arguments.bord,
+            maintenant=time.time,
+        )
+    except (OSError, ValueError) as exc:
+        logger.error("lire : {}", exc)
+        return 2
+    except RuntimeError as exc:
+        logger.error("lecture interrompue : {}", exc)
+        return 1
+    print(f"{n} test(s) lu(s) -> {arguments.sortie}")
+    logger.debug("commande_lire : sortie {} test(s)", n)
     return 0

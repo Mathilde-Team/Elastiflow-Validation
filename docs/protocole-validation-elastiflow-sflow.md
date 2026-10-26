@@ -597,6 +597,47 @@ La série est en fin de plan : les ports sources des autres tests ne bougent pas
 verdicts attendus (colonne `attendu`) ; la comparaison automatique avec la sortie de qos-audit relève de #6 et
 de qos-audit#36.
 
+### 8.8 Sondes de production : série S
+
+sFlow ne voit ni pertes, ni gigue, ni latence (8.5). Les tests Q les mesurent par classe, mais seulement en lab.
+La série S en garde la partie **sans risque pour la production** : un flux léger par classe, **dans le profil**,
+relancé périodiquement, pour savoir si la priorisation fonctionne au quotidien (issue #17, qos-audit#29).
+
+| Paramètre | Valeur | Justification |
+|---|---|---|
+| Classes | EF, AF41, D1, D2, D3, BF (`-S` du 8.1) | Une sonde par classe, port source propre (plan YAML) |
+| Débit | 64 kbit/s par classe, 384 kbit/s la passe | Très en dessous du palier « 50 % du CIR » de Q2 pour tout CIR de 128 kbit/s ou plus ; sur un CIR plus petit, réduire `debit` |
+| Paquets | IP de 200 o (`-l 172`) | Proche de la voix : la gigue mesurée est celle qu'un flux temps réel subirait |
+| Durée | 30 s, les six classes **en même temps** (groupe S) | Comparer les classes au même instant : c'est ce qui révèle une priorisation inversée |
+| Période | Une passe toutes les 15 min | 96 passes par jour, 3,3 % du temps ; assez pour couvrir les heures chargées |
+| Mesures | Rapport serveur iperf2 (`-e`) : paquets émis et perdus, gigue ; latence avec `--trip-times` si les horloges sont fines (7.2) | |
+
+`efv plan --profil sonde` affiche les commandes ; `efv injecter --profil sonde` lance une passe (planifier par cron
+ou timer systemd sur le client, serveur `iperf -s -u -p 50001 -e` permanent).
+
+**Restent réservés au lab** : Q3 (congestion à 130 %), Q4 (excès d'EF), Q2 aux paliers 100 et 150 %, la saturation
+d'une minute (7.10) et la série R (R4, R5). Une sonde ne doit jamais charger le lien ni sortir du profil d'une classe.
+
+**Format de sortie** `sondes.csv` (UTF-8, séparateur virgule, une ligne par classe et par passe), lu par
+qos-audit (#29) :
+
+| Colonne | Contenu |
+|---|---|
+| `horodatage` | Début de la passe, ISO 8601 UTC (`2026-10-26T09:15:00Z`) |
+| `site`, `sortie` | Noms de la politique qos-audit (`sites[].name`, `exits[].name`) |
+| `classe` | EF, AF41, D1, D2, D3 ou BF |
+| `dscp` | DSCP émis (46, 34, 26, 18, 10, 0) |
+| `debit_bps`, `duree_s` | Débit et durée demandés |
+| `paquets_emis`, `paquets_perdus` | Rapport serveur |
+| `pertes_pct` | `100 × paquets_perdus / paquets_emis` |
+| `gigue_ms` | Gigue du rapport serveur |
+| `latence_ms` | Latence moyenne (`--trip-times`), vide si les horloges ne sont pas assez fines |
+| `outil` | `iperf2` (ou `iperf3`, voir #32) |
+
+Lecture attendue côté qos-audit : sur une même passe, EF ou AF41 dégradée alors que BF ne l'est pas signale une
+**priorisation inversée** ; une dégradation de toutes les classes signale une congestion ou un incident hors QoS.
+Les seuils (pertes, gigue) sont ceux du contrat de l'opérateur (8.6) et se fixent dans qos-audit.
+
 ## 9. Partie lecture dans ElastiFlow
 
 ### 9.1 Principe

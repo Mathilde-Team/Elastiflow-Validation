@@ -317,6 +317,11 @@ def commande_plan(arguments: argparse.Namespace) -> int:
                 "Recette qos-audit : comparer ses verdicts à la colonne « attendu » "
                 "(comparaison automatique : #6, qos-audit#36)"
             )
+        elif arguments.profil == "sonde":
+            print(
+                "Sondes de production : une passe toutes les 15 min, résultats au format "
+                "sondes.csv (protocole 8.8, qos-audit#29)"
+            )
         elif arguments.profil:
             print(
                 f"Profil {arguments.profil} : un verdict « Validé » sur ce profil "

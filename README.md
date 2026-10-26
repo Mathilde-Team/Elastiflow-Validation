@@ -49,12 +49,17 @@ uv run efv plan --lien 1G --format csv > plan.csv
 uv run efv plan --lien 10M --plan mon-plan.yaml
 uv run efv plan --lien 10M --profil minimal   # sous-ensemble d'environ 1 jour (protocole 11)
 uv run efv plan --lien 10M --profil recette   # recette de qos-audit (série R, protocole 8.7)
+uv run efv plan --lien 10M --profil sonde     # sondes de production (série S, protocole 8.8)
 ```
 
 La série R injecte des défauts connus (voix en TOS 0, EF depuis un port non fiable, DSCP hors plan, 150 %
 de charge, bascule de sortie, sampling trop grossier) ; le champ `attendu` du plan porte le verdict
 qos-audit attendu (`controle:GRAVITE`), affiché dans la colonne `attendu`, et `port_destination` remplace
 le port du serveur iperf pour un test (port RTP de R1).
+
+La série S garde des tests Q la seule partie sûre en production : une sonde de 64 kbit/s par classe, dans le
+profil, les six classes en même temps pendant 30 s, toutes les 15 min ; les résultats suivent le format
+`sondes.csv` du protocole 8.8, lu par qos-audit (#29).
 
 `efv injecter` remplace `run_test.sh` (§7.7) sur le client du banc (root, `iperf` 2 et `nft`) : une règle
 nft `counter` par port source, un iperf2 par port (`-B CLIENT:PORT`), les tests d'un même groupe (Q3, Q4)

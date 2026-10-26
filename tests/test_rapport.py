@@ -7,8 +7,9 @@ import math
 from pathlib import Path
 
 import pytest
+import yaml
 
-from elastiflow_validation import cli, rapport
+from elastiflow_validation import cli, lecture, rapport
 
 COLONNES_RESULTATS = (
     "id,repetition,serie,groupe,protocole,debit,taille,tos,ports,sampling,debut,fin,"
@@ -244,3 +245,111 @@ def test_cli_rapport_fichier_absent(tmp_path, capsys):
         ]
     )
     assert code == 2
+
+
+def test_construire_calibration_yaml_structure(tmp_path):
+    """Le brouillon reprend P4 (champs traduits), P6 inféré et P2 (exportateurs, samplings)."""
+    resultats = _resultats(tmp_path, [_test_reference("A3")])
+    lectures = _lectures(tmp_path, [_lecture("A3")])
+    analyses, _ = rapport.analyser(resultats, lectures)
+    texte = rapport.construire_calibration_yaml(analyses, lecture.CHAMPS_DEFAUT, 7)
+    cal = yaml.safe_load(texte)
+    assert cal["reference"] == "VAL-ELASTIFLOW-001"
+    assert cal["validated_on"] is None
+    assert cal["elastiflow"]["fields"]["exporter"] == "flow.export.host.name"
+    assert cal["elastiflow"]["fields"]["bytes"] == "network.bytes"
+    assert cal["elastiflow"]["ingest_lag_minutes"] == 7
+    # octets ElastiFlow ≈ référence : le facteur d'échantillonnage est déjà appliqué
+    assert cal["elastiflow"]["sampling_already_applied"] is True
+    assert cal["exporters"]["sw-a"]["sampling_direction"] == "inbound"
+    assert cal["exporters"]["sw-a"]["validation"]["sampling_rates"] == [8]
+    assert cal["exporters"]["sw-a"]["interfaces"] == []
+
+
+def test_construire_calibration_p6_non_applique(tmp_path):
+    """Octets ElastiFlow ≈ référence ÷ sampling : le facteur n'est pas appliqué."""
+    lignes = [_test_reference("A2", sampling="8", octets="8000000", paquets="64000")]
+    lectures_lignes = [_lecture("A2", octets="1000000", paquets="8000")]
+    analyses, _ = rapport.analyser(
+        _resultats(tmp_path, lignes), _lectures(tmp_path, lectures_lignes)
+    )
+    texte = rapport.construire_calibration_yaml(analyses, {}, 10)
+    assert yaml.safe_load(texte)["elastiflow"]["sampling_already_applied"] is False
+
+
+def test_construire_calibration_p6_ambigu(tmp_path):
+    """Ni l'un ni l'autre : la valeur reste à trancher (null), jamais devinée."""
+    lignes = [_test_reference("A2", sampling="8", octets="8000000", paquets="64000")]
+    lectures_lignes = [_lecture("A2", octets="4000000", paquets="32000")]
+    analyses, _ = rapport.analyser(
+        _resultats(tmp_path, lignes), _lectures(tmp_path, lectures_lignes)
+    )
+    texte = rapport.construire_calibration_yaml(analyses, {}, 10)
+    assert yaml.safe_load(texte)["elastiflow"]["sampling_already_applied"] is None
+
+
+def test_construire_calibration_p5_octets_par_paquet(tmp_path):
+    """Marge B/C : +14 octets par paquet (base trame) → bytes_overhead_per_packet = 14."""
+    lignes = [_test_reference("B1", sampling="1", octets="1000000", paquets="10000")]
+    lectures_lignes = [_lecture("B1", octets="1140000", paquets="10000", sampling="1")]
+    analyses, _ = rapport.analyser(
+        _resultats(tmp_path, lignes), _lectures(tmp_path, lectures_lignes)
+    )
+    texte = rapport.construire_calibration_yaml(analyses, {}, 10)
+    assert yaml.safe_load(texte)["elastiflow"]["bytes_overhead_per_packet"] == 14
+
+
+def test_ecrire_calibration_cree_les_dossiers(tmp_path):
+    resultats = _resultats(tmp_path, [_test_reference("A3")])
+    lectures = _lectures(tmp_path, [_lecture("A3")])
+    chemin = tmp_path / "calibrations" / "site-a.yaml"
+    assert rapport.ecrire_calibration(resultats, lectures, chemin, lecture.CHAMPS_DEFAUT, 10) == 1
+    assert "reference: VAL-ELASTIFLOW-001" in chemin.read_text(encoding="utf-8")
+
+
+def test_cli_rapport_calibration(tmp_path, capsys):
+    resultats = _resultats(tmp_path, [_test_reference("A3")])
+    lectures = _lectures(tmp_path, [_lecture("A3")])
+    sortie = tmp_path / "rapport.md"
+    calibration = tmp_path / "calibrations" / "site-a.yaml"
+    code = cli.main(
+        [
+            "rapport",
+            "--resultats",
+            str(resultats),
+            "--lectures",
+            str(lectures),
+            "--sortie",
+            str(sortie),
+            "--calibration",
+            str(calibration),
+            "--ingest-lag-minutes",
+            "5",
+        ]
+    )
+    assert code == 0
+    assert sortie.exists() and calibration.exists()
+    assert (
+        yaml.safe_load(calibration.read_text(encoding="utf-8"))["elastiflow"]["ingest_lag_minutes"]
+        == 5
+    )
+
+
+def test_calibration_chargee_par_qos_audit(tmp_path):
+    """Contrat de l'issue #15 : le fichier produit se charge sans erreur par qos_audit.
+
+    Le test ne tourne que là où le paquet voisin est installé (les deux dépôts sont privés : la CI
+    d'Elastiflow-Validation ne l'installe pas) ; ailleurs il est sauté, la structure étant vérifiée
+    par ``test_construire_calibration_yaml_structure``.
+    """
+    qos_audit = pytest.importorskip("qos_audit.calibration")
+    resultats = _resultats(tmp_path, [_test_reference("A3")])
+    lectures = _lectures(tmp_path, [_lecture("A3")])
+    chemin = tmp_path / "calibrations" / "site-a.yaml"
+    rapport.ecrire_calibration(resultats, lectures, chemin, lecture.CHAMPS_DEFAUT, 10)
+    cal = qos_audit.load_calibration(chemin)
+    assert cal.reference == "VAL-ELASTIFLOW-001"
+    assert cal.fields["exporter"] == "flow.export.host.name"
+    assert cal.sampling_already_applied is True
+    assert cal.exporters["sw-a"].validation is not None
+    assert cal.exporters["sw-a"].validation.sampling_rates == (8,)

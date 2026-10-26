@@ -61,6 +61,9 @@ nft `counter` par port source, un iperf2 par port (`-B CLIENT:PORT`), les tests 
 lancés ensemble, relevé des compteurs 2 s après la fin, une ligne par test ajoutée à `resultats.csv`, pause de
 5 min entre deux lancements. Les changements de sampling de l'exporteur et les préalables (`tc … netem`) sont
 annoncés et attendent la confirmation de l'opérateur ; les tests de laboratoire demandent `--lab`.
+Sans iperf2, `--outil iperf3` (§7.12) génère les commandes iperf3 (`--cport`, `-b 0` en UDP sans débit,
+`--pacing-timer 100`, rapport JSON) et donne à chaque processus simultané son serveur (`50001`, `50002`…,
+liste à lancer affichée) ; `port_destination` est alors une plage pour les tests à plusieurs processus.
 
 ```bash
 uv run efv injecter --lien 10M --test A2 --dry-run          # commandes, sans rien exécuter

@@ -232,6 +232,17 @@ def _ports(texte: str) -> tuple[int, int]:
     return plage
 
 
+def _filtre_port_destination(champ: str, texte: str) -> dict:
+    """Filtre du port de destination : ``term`` (un port) ou ``range`` (iperf3, un serveur par
+    processus simultané : ``50001-50008``)."""
+    logger.debug("_filtre_port_destination : entrée {}", texte)
+    bas, haut = _ports(texte)
+    plage = {"range": {champ: {"gte": bas, "lte": haut}}}
+    filtre = {"term": {champ: bas}} if bas == haut else plage
+    logger.debug("_filtre_port_destination : sortie {}", filtre)
+    return filtre
+
+
 def fenetre_utile(debut: int, fin: int, bord_s: int = BORD_S) -> tuple[int, int]:
     """Minutes entières du test hors bords : ``[début + bord, fin − bord]`` arrondi à la minute.
 
@@ -264,13 +275,10 @@ def requete_test(
         {"term": {champs["ip_source"]: ligne.get("client") or banc.client}},
         {"term": {champs["ip_destination"]: ligne.get("serveur") or banc.serveur}},
         {"range": {champs["port_source"]: {"gte": bas, "lte": haut}}},
-        {
-            "term": {
-                champs["port_destination"]: int(
-                    ligne.get("port_destination") or banc.port_destination
-                )
-            }
-        },
+        _filtre_port_destination(
+            champs["port_destination"],
+            ligne.get("port_destination") or str(banc.port_destination),
+        ),
         {
             "range": {
                 champs["horodatage"]: {

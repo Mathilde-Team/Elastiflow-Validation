@@ -197,10 +197,10 @@ D2 et D3 sont ajoutés en second temps si les résultats de D1 le justifient.
 | ID | Test | Attendu | Mesuré | Statut |
 | --- | --- | --- | --- | --- |
 | G1 | Deux VLAN (routage inter-VLAN) | VLAN source et destination, interfaces d'entrée et de sortie |  | ☐ OK ☐ KO |
-| G2 | ICMP (`ping -s 1000`) | Protocole ICMP, sans ports |  | ☐ OK ☐ KO |
+| G2 | ICMP (`ping -i 0.2 -s 1000 -t 64`, 300 s à 1:8, `efv injecter`) | Protocole ICMP, sans ports ; paquets dans la borne à 95 % des 1500 echo-request comptés par nft |  | ☐ OK ☐ KO |
 | G3 | Flags TCP (connexions courtes en nombre connu) | SYN, FIN, RST en proportion du nombre de connexions |  | ☐ OK ☐ KO |
 | G4 | IPv6 | Adresses et classe de trafic corrects |  | ☐ OK ☐ KO |
-| G5 | Fragmentation (UDP de 3000 o) | Fragments suivants sans ports, noté |  | ☐ OK ☐ KO |
+| G5 | Fragmentation (UDP de 3000 o, 300 s à 1:8, `efv injecter`, lecture sans ports) | Fragments suivants sans ports ; paquets ≈ 2 × nft, octets ≈ nft + 20 o par datagramme |  | ☐ OK ☐ KO |
 | G6 | Compteurs d'interface (intervalle de 30 s) | Utilisation calculée par ElastiFlow = `display counters rate` du switch |  | ☐ OK ☐ KO |
 
 ## 8. Synthèse chiffrée des erreurs

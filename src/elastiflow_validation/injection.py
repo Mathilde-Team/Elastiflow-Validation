@@ -166,6 +166,22 @@ class SystemeReel:
         logger.debug("fermer : fait")
 
 
+def _sources(t: plan.Test) -> tuple[int, ...]:
+    """Ports source d'un test ; ``(0,)`` pour l'ICMP (G2), sans port : une règle, un processus."""
+    return t.ports or (0,)
+
+
+def _commande_ping(e: plan.Execution, banc: Banc) -> list[str]:
+    """Commande ``ping`` d'un test ICMP (G2, protocole 7.11) : cadence fixe, TTL 64."""
+    logger.debug("_commande_ping : {}#{}", e.test.id, e.repetition)
+    t = e.test
+    nombre = round((t.duree_s or 0) / plan.INTERVALLE_PING_S)
+    cmd = ["ping", "-c", str(nombre), "-i", str(plan.INTERVALLE_PING_S), "-s", str(e.charge_udp),
+           "-t", "64", "-Q", f"{t.tos or 0:#04x}", "-I", banc.client, banc.serveur]  # fmt: skip
+    logger.debug("_commande_ping : {}", shlex.join(cmd))
+    return cmd
+
+
 def _commentaire(e: plan.Execution, port: int) -> str:
     """Commentaire de la règle nft d'un port : identifie test, répétition et port."""
     return f"efv {e.test.id}#{e.repetition} {port}"
@@ -182,6 +198,10 @@ def commande_iperf(e: plan.Execution, port: int, banc: Banc) -> list[str]:
     if t.protocole is None:
         logger.debug("commande_iperf : test manuel")
         raise ValueError(f"{t.id} : test manuel, pas de commande iperf")
+    if t.protocole == "icmp":
+        cmd = _commande_ping(e, banc)
+        logger.debug("commande_iperf : ping")
+        return cmd
     if e.debit_bps is None and t.debit is not None and t.debit.base == "cir":
         logger.debug("commande_iperf : CIR manquant")
         raise ValueError(f"{t.id} : débit contractuel de la classe non fourni (--cir)")
@@ -222,6 +242,11 @@ def _regle_nft(e: plan.Execution, port: int) -> list[str]:
     """Règle ``counter`` d'un port source."""
     logger.debug("_regle_nft : {}#{} port {}", e.test.id, e.repetition, port)
     proto = e.test.protocole or ""
+    if proto == "icmp":  # pas de port : les echo-request du client pendant le test
+        regle = ["nft", "add", "rule", *TABLE, CHAINE, "icmp", "type", "echo-request", "counter",
+                 "comment", f'"{_commentaire(e, port)}"']  # fmt: skip
+        logger.debug("_regle_nft : {}", regle)
+        return regle
     regle = ["nft", "add", "rule", *TABLE, CHAINE, proto, "sport", str(port), "counter",
              "comment", f'"{_commentaire(e, port)}"']  # fmt: skip
     logger.debug("_regle_nft : {}", regle)
@@ -263,13 +288,18 @@ def _ligne(
     de lecture dans ElastiFlow (``efv lire``)."""
     logger.debug("_ligne : {}#{}", e.test.id, e.repetition)
     t = e.test
-    ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    ports = ""
+    if t.ports:
+        ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    dport = str(t.port_destination or banc.port_destination)
+    if t.cle == "ip":  # lecture sans ports (ICMP, fragments) : colonnes vides
+        ports = dport = ""
     ligne = [
         t.id, str(e.repetition), t.serie, t.groupe or "", t.protocole or "", e.iperf_b or "max",
         "" if t.taille is None else str(t.taille), f"{t.tos or 0:#04x}", ports,
         "nominal" if t.sampling is None else f"1:{t.sampling}",
         str(debut), str(fin), str(paquets), str(octets),
-        banc.client, banc.serveur, str(t.port_destination or banc.port_destination),
+        banc.client, banc.serveur, dport,
     ]  # fmt: skip
     logger.debug("_ligne : {} paquets, {} octets", paquets, octets)
     return ligne
@@ -301,7 +331,7 @@ def _executer_lancement(
         RuntimeError: iperf en échec, ou compteur nft introuvable.
     """
     logger.debug("_executer_lancement : {}#{}", lancement.cle, lancement.repetition)
-    paires = [(e, port) for e in lancement.executions for port in e.test.ports]
+    paires = [(e, port) for e in lancement.executions for port in _sources(e.test)]
     commandes = [(e, port, commande_iperf(e, port, banc)) for e, port in paires]
     for e, port in paires:
         systeme.executer(_regle_nft(e, port))
@@ -318,7 +348,7 @@ def _executer_lancement(
     manquants: list[str] = []
     for e in lancement.executions:
         paquets = octets = 0
-        for port in e.test.ports:
+        for port in _sources(e.test):
             valeurs = compteurs.get(_commentaire(e, port))
             if valeurs is None:
                 manquants.append(_commentaire(e, port))
@@ -346,7 +376,7 @@ def _simuler(lancement: Lancement, banc: Banc) -> list[str]:
     for e in lancement.executions:
         if e.test.prealable:
             lignes.append(f"# préalable : {e.test.prealable}")
-        for port in e.test.ports:
+        for port in _sources(e.test):
             lignes.append(shlex.join(_regle_nft(e, port)))
             lignes.append(shlex.join(commande_iperf(e, port, banc)) + " &")
     lignes.append("wait")
@@ -392,7 +422,7 @@ def injecter(
     a_faire = lancements(retenues)
     for lancement in a_faire:  # contrôle avant d'injecter quoi que ce soit
         for e in lancement.executions:
-            commande_iperf(e, e.test.ports[0], banc)
+            commande_iperf(e, _sources(e.test)[0], banc)
     if dry_run:
         for lancement in a_faire:
             afficher("\n".join(_simuler(lancement, banc)))

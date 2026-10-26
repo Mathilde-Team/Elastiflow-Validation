@@ -255,22 +255,14 @@ def requete_test(
     """Corps ``_search`` d'un test : filtre sur la clé et la fenêtre, agrégations par exportateur.
 
     Les colonnes ``client``, ``serveur`` et ``port_destination`` de la ligne priment sur ``banc``
-    (fichiers produits avant leur ajout : valeurs du banc).
+    (fichiers produits avant leur ajout : valeurs du banc). ``ports`` vide : clé IP et protocole
+    seuls (tests ``cle: ip`` du plan, G2 et G5).
     """
     logger.debug("requete_test : entrée {}#{}", ligne["id"], ligne["repetition"])
-    bas, haut = _ports(ligne["ports"])
     debut, fin = int(ligne["debut"]), int(ligne["fin"])
     filtres: list[dict] = [
         {"term": {champs["ip_source"]: ligne.get("client") or banc.client}},
         {"term": {champs["ip_destination"]: ligne.get("serveur") or banc.serveur}},
-        {"range": {champs["port_source"]: {"gte": bas, "lte": haut}}},
-        {
-            "term": {
-                champs["port_destination"]: int(
-                    ligne.get("port_destination") or banc.port_destination
-                )
-            }
-        },
         {
             "range": {
                 champs["horodatage"]: {
@@ -281,6 +273,13 @@ def requete_test(
             }
         },
     ]
+    if ligne.get("ports"):  # vide : clé sans ports (ICMP, fragments sans en-tête L4, #33)
+        bas, haut = _ports(ligne["ports"])
+        port_destination = int(ligne.get("port_destination") or banc.port_destination)
+        filtres += [
+            {"range": {champs["port_source"]: {"gte": bas, "lte": haut}}},
+            {"term": {champs["port_destination"]: port_destination}},
+        ]
     if ligne.get("protocole"):
         filtres.append({"term": {champs["protocole"]: ligne["protocole"]}})
     sommes = {
@@ -306,7 +305,7 @@ def requete_test(
             }
         },
     }
-    logger.debug("requete_test : sortie ports {}-{}", bas, haut)
+    logger.debug("requete_test : sortie ports {}", ligne.get("ports") or "aucun")
     return corps
 
 

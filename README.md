@@ -61,6 +61,9 @@ nft `counter` par port source, un iperf2 par port (`-B CLIENT:PORT`), les tests 
 lancés ensemble, relevé des compteurs 2 s après la fin, une ligne par test ajoutée à `resultats.csv`, pause de
 5 min entre deux lancements. Les changements de sampling de l'exporteur et les préalables (`tc … netem`) sont
 annoncés et attendent la confirmation de l'opérateur ; les tests de laboratoire demandent `--lab`.
+G2 (ICMP, `ping`) et G5 (fragmentation, UDP de 3028 o) sont injectés eux aussi ; marqués `cle: ip` dans le
+plan, ils laissent `ports` et `port_destination` vides dans `resultats.csv` et `efv lire` les lit par IP et
+protocole (§7.11).
 
 ```bash
 uv run efv injecter --lien 10M --test A2 --dry-run          # commandes, sans rien exécuter

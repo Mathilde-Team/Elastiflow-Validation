@@ -7,6 +7,8 @@
 # Les ports sources sont attribués dans l'ordre du fichier : 40000 + N, N à partir de 1,
 # un port par processus iperf. Les tests d'un même « groupe » partent simultanément.
 # Recette qos-audit (#16) : « attendu » (verdicts controle:GRAVITE), « port_destination » (port du serveur).
+# Série G (#33) : « protocole: icmp » (ping toutes les 0,2 s, taille et durée seules, sans port) ;
+# « cle: ip » : lecture par IP et protocole, sans ports (fragments sans en-tête L4).
 version: 1
 tests:
   # Phase 0 : calibrage (7.6)
@@ -122,10 +124,12 @@ tests:
   # Tests hors iperf : à mener à la main (8.4, 7.11)
   - {id: Q6, serie: Q, manuel: "CoS 802.1p : sous-interface VLAN avec egress-qos-map"}
   - {id: G1, serie: G, manuel: "Deux VLAN (routage inter-VLAN) : VLAN et interfaces d'entrée et de sortie"}
-  - {id: G2, serie: G, manuel: "ICMP : ping -i 0.2 -s 1000 -t 64 SERVEUR"}
+  # G2 et G5 outillés (#33) ; G2 sans port ne décale pas les ports des tests suivants, G5 est en fin
+  # de fichier. G1, G3, G4 et G6 restent manuels : justification au protocole 7.11.
+  - {id: G2, serie: G, protocole: icmp, taille: 1028, duree: 300, sampling: 8,
+     objectif: "ICMP (ping -i 0.2 -s 1000 -t 64) : protocole 1, sans ports, paquets = nft"}
   - {id: G3, serie: G, manuel: "Flags TCP : connexions courtes en nombre connu (hping3 / nping)"}
   - {id: G4, serie: G, manuel: "IPv6 : mêmes tests en IPv6"}
-  - {id: G5, serie: G, manuel: "Fragmentation : UDP -l 3000"}
   - {id: G6, serie: G, manuel: "Compteurs d'interface : display counters rate inbound interface"}
 
   # Série R : recette de qos-audit (#16, qos-audit#36). Chaque test injecte un défaut connu ;
@@ -149,6 +153,12 @@ tests:
      attendu: ["sampling_adequacy:CRIT"],
      prealable: "Sortie du banc déclarée à 10 Mbit/s dans la politique qos-audit",
      objectif: "Sampling 1:4096 trop grossier pour une sortie à 10 Mbit/s"}
+
+  # G5 : fragmentation (#33, protocole 7.11). En fin de fichier pour ne pas décaler les autres ports.
+  # nft compte le datagramme avant fragmentation (3028 o), le lien porte 2 fragments (3048 o d'IP) ;
+  # les fragments suivants n'ont pas de ports : lecture par IP et protocole (cle: ip).
+  - {id: G5, serie: G, protocole: udp, debit: 1%, taille: 3028, dscp: BF, duree: 300, sampling: 8,
+     cle: ip, objectif: "Fragmentation : paquets ElastiFlow ≈ 2 × nft, octets ≈ nft + 20 o par datagramme"}
 
 # Sous-ensembles du plan (efv plan --profil NOM). Sélecteur : identifiant, motif (Q1-*) ou groupe.
 # Les tests de phase 0 hors iperf (P1 à P4, P7 à P9) restent des prérequis de tout profil (7.6).

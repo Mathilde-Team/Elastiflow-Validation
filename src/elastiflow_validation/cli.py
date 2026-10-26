@@ -269,7 +269,11 @@ def _ligne_plan(e: plan.Execution) -> list[str]:
         if t.duree_s is not None
         else f"-n {plan.format_debit(t.volume_octets or 0)}"
     )
-    ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    ports = ""  # ICMP (G2) : pas de port
+    if t.ports:
+        ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    if t.cle == "ip":
+        ports = f"{ports} (lu sans ports)".strip()
     port = "" if t.port_destination is None else f"port destination {t.port_destination}"
     notes = [x for x in ("lab" if t.lab else "", port, t.prealable or "") if x]
     valeurs = [

@@ -81,6 +81,11 @@ d'échantillonnage : `efv rapport`, #6). Les noms de champs (défauts alignés s
 `--champs champs.yaml` (`sampling: flow.sampling_interval`, clés : `horodatage`, `ip_source`,
 `ip_destination`, `port_source`, `port_destination`, `protocole`, `octets`, `paquets`, `exportateur`,
 `sampling`, `dscp`) ; chacun est vérifié dans le `_mapping` de l'index avant toute lecture (P4, #14).
+Champs facultatifs (#30), ignorés avec un avertissement s'ils manquent au mapping : `interface_entree`
+(`flow.input.ifindex`) et `interface_sortie` (`flow.output.ifindex`) donnent la colonne `interfaces`
+(octets par couple, `12>3=4500`) ; `echantillonneur` (sans défaut : champ de l'interface qui a prélevé le
+paquet, sFlow `source_id_index`, à relever en P4) donne `echantillonneurs` et `double_echantillonnage`
+(`oui` quand plusieurs échantillonneurs d'un même exportateur ont vu le test).
 
 ```bash
 export EFV_ES_URL=https://elastic.example:9200   # + EFV_ES_API_KEY, ou EFV_ES_USER et EFV_ES_PASSWORD

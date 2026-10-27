@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
 from loguru import logger
 
 __all__ = [
@@ -31,13 +32,28 @@ __all__ = [
     "analyser",
     "biais_moyen",
     "comparaison_sampling",
+    "construire_calibration_yaml",
     "construire_document",
+    "ecrire_calibration",
     "rapport",
 ]
 
 BORNE = 196.0
 SERIES_BIAIS = ("A2", "A3", "A5")
 SUFFIXE_ANCIEN_SAMPLING = "-4096"
+# Clés de lecture (CHAMPS_DEFAUT) traduites vers les clés de ``elastiflow.FIELDS`` de qos-audit.
+CHAMPS_VERS_QOS_AUDIT = {
+    "exportateur": "exporter",
+    "ip_source": "src_ip",
+    "ip_destination": "dst_ip",
+    "port_source": "src_port",
+    "port_destination": "dst_port",
+    "protocole": "proto",
+    "octets": "bytes",
+    "paquets": "packets",
+    "sampling": "sampling",
+    "dscp": "dscp",
+}
 
 
 @dataclass(frozen=True)
@@ -314,4 +330,121 @@ def rapport(resultats: Path, lectures: Path, sortie: Path) -> int:
     sortie.write_text(texte, encoding="utf-8")
     logger.info("{} analyse(s), {} test(s) sans lecture -> {}", len(analyses), len(non_lus), sortie)
     logger.debug("rapport : sortie | {} analyse(s)", len(analyses))
+    return len(analyses)
+
+
+def _sampling_deja_applique(analyses: Sequence[Analyse]) -> bool | None:
+    """P6 inféré : octets ≈ référence (appliqué) ou ≈ référence ÷ sampling (non appliqué)."""
+    logger.debug("_sampling_deja_applique : entrée | {} analyse(s)", len(analyses))
+    mesures = [
+        a
+        for a in analyses
+        if a.id[:1] == "A" and a.octets_reference and a.sampling and a.erreur_pct is not None
+    ]
+    inference: bool | None = None
+    if mesures:
+        directs = [a.octets_elastiflow / a.octets_reference for a in mesures]
+        corriges = [a.octets_elastiflow * a.sampling / a.octets_reference for a in mesures]
+        if all(0.98 <= r <= 1.02 for r in directs):
+            inference = True
+        elif all(0.98 <= r <= 1.02 for r in corriges):
+            inference = False
+    logger.debug("_sampling_deja_applique : sortie | {}", inference)
+    return inference
+
+
+def _octets_par_paquet(analyses: Sequence[Analyse]) -> int | None:
+    """P5 inféré : marge moyenne (octets ElastiFlow − référence) ÷ paquets, sur les tests B et C."""
+    logger.debug("_octets_par_paquet : entrée | {} analyse(s)", len(analyses))
+    marges = [
+        (a.octets_elastiflow - a.octets_reference) / a.paquets_reference
+        for a in analyses
+        if a.id[:1] in ("B", "C") and a.paquets_reference and a.octets_reference
+    ]
+    marge = max(0, round(sum(marges) / len(marges))) if marges else None
+    logger.debug("_octets_par_paquet : sortie | {}", marge)
+    return marge
+
+
+def construire_calibration_yaml(
+    analyses: Sequence[Analyse], champs: dict[str, str], ingest_lag_minutes: int
+) -> str:
+    """Brouillon de ``calibrations/<site>.yaml`` au format lu par ``qos_audit.calibration``.
+
+    P4 (champs), P6 (facteur appliqué), P5 (octets par paquet) et P2 (exportateurs et samplings
+    observés) sont remplis depuis les mesures ; ``model``, ``comware_version``, ``interfaces``
+    (display sflow), la version ElastiFlow et ``validated_on`` restent à compléter à la main.
+    """
+    logger.debug(
+        "construire_calibration_yaml : entrée | {} analyse(s), délai {} min",
+        len(analyses),
+        ingest_lag_minutes,
+    )
+    par_exportateur: dict[str, set[int]] = {}
+    for a in analyses:
+        par_exportateur.setdefault(a.exportateur, set()).add(a.sampling)
+    document = {
+        "reference": "VAL-ELASTIFLOW-001",
+        "validated_on": None,
+        "elastiflow": {
+            "version": "à renseigner",
+            "fields": {
+                CHAMPS_VERS_QOS_AUDIT[c]: v for c, v in champs.items() if c in CHAMPS_VERS_QOS_AUDIT
+            },
+            "counters_index": "elastiflow-telemetry_flow-*",
+            "counter_fields": {
+                "ifindex": "netif.index",
+                "bytes_in": "netif.bytes.in",
+                "bytes_out": "netif.bytes.out",
+            },
+            "sampling_already_applied": _sampling_deja_applique(analyses),
+            "bytes_overhead_per_packet": _octets_par_paquet(analyses) or 0,
+            "ingest_lag_minutes": ingest_lag_minutes,
+        },
+        "exporters": {
+            nom: {
+                "model": "à renseigner",
+                "comware_version": "à renseigner",
+                "sampling_direction": "inbound",
+                "counter_interval_s": 30,
+                "interfaces": [],
+                "validation": {
+                    "sampling_direction": "inbound",
+                    "sampling_rates": sorted(taux),
+                },
+            }
+            for nom, taux in sorted(par_exportateur.items())
+        },
+    }
+    texte = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
+    texte = (
+        "# Calibration issue de la validation d'ElastiFlow (VAL-ELASTIFLOW-001), générée par "
+        "`efv rapport`.\n"
+        "# Brouillon : P5/P6 sont inférés des mesures, counters_* sont les défauts "
+        "à vérifier sur la télémétrie.\n"
+        "# À compléter avant exploitation par qos-audit : model, comware_version, interfaces "
+        "(display sflow),\n"
+        "# version ElastiFlow, validated_on (date de signature du verdict).\n"
+    ) + texte
+    logger.debug("construire_calibration_yaml : sortie | {} caractère(s)", len(texte))
+    return texte
+
+
+def ecrire_calibration(
+    resultats: Path, lectures: Path, chemin: Path, champs: dict[str, str], ingest_lag_minutes: int
+) -> int:
+    """Écrit le brouillon de calibration ; ``calibrations/<site>.yaml`` (issue #15).
+
+    Returns:
+        Nombre d'analyses ayant servi à la calibration.
+    """
+    logger.debug("ecrire_calibration : entrée | {} -> {}", lectures, chemin)
+    analyses, _ = analyser(resultats, lectures)
+    if chemin.parent != Path(""):
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_text(
+        construire_calibration_yaml(analyses, champs, ingest_lag_minutes), encoding="utf-8"
+    )
+    logger.info("calibration -> {}", chemin)
+    logger.debug("ecrire_calibration : sortie | {} analyse(s)", len(analyses))
     return len(analyses)

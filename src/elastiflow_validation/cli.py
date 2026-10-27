@@ -437,6 +437,15 @@ def commande_rapport(arguments: argparse.Namespace) -> int:
     )
     try:
         n = rapport.rapport(arguments.resultats, arguments.lectures, arguments.sortie)
+        if arguments.calibration:
+            champs = lecture.charger_champs(arguments.champs)
+            rapport.ecrire_calibration(
+                arguments.resultats,
+                arguments.lectures,
+                arguments.calibration,
+                champs,
+                arguments.ingest_lag_minutes,
+            )
     except (OSError, ValueError, KeyError) as exc:
         logger.error("rapport : {}", exc)
         return 2
@@ -463,6 +472,21 @@ def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
     p.add_argument("--lectures", type=Path, default=Path("lectures.csv"), help="sortie de lire")
     p.add_argument(
         "--sortie", type=Path, default=Path("rapport-validation.md"), help="fichier écrit"
+    )
+    p.add_argument(
+        "--calibration",
+        type=Path,
+        default=None,
+        help="écrit aussi calibrations/<site>.yaml au format qos-audit (issue #15)",
+    )
+    p.add_argument(
+        "--champs", type=Path, help="YAML « clé: nom de champ » (P4, pour la calibration)"
+    )
+    p.add_argument(
+        "--ingest-lag-minutes",
+        type=int,
+        default=10,
+        help="délai d'agrégation P7 inscrit dans la calibration (défaut : 10)",
     )
     p.set_defaults(action=commande_rapport)
     logger.debug("_ajouter_rapport : sortie")

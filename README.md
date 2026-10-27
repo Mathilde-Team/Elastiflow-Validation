@@ -15,6 +15,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 | Plan de tests (phase 0, séries A à E, QoS, G1 à G6) : disponible | `efv plan` | #3 |
 | Injection iperf2 et relevé nft vers `resultats.csv` : disponible | `efv injecter` | #4 |
 | Lecture ElastiFlow (Elasticsearch / OpenSearch) vers `lectures.csv` : disponible | `efv lire` | #5 |
+| Constance du débit : série par minute et verdict de stabilité | `efv lire --series --stabilite` | #31 |
 | Comparaison, verdict et document de validation rempli | `efv rapport` | #6 |
 
 ## Installation et usage
@@ -88,6 +89,19 @@ uv run efv lire --resultats resultats.csv --sortie lectures.csv --index 'elastif
 ```
 
 URL et identifiants sont lus dans l'environnement (`EFV_ES_CA` pour l'autorité du cluster) et jamais affichés.
+
+**Constance du débit** (#31, §9.3 et §10.1) : `--series series.csv` écrit la série par minute utile de chaque
+test et exportateur (échantillons = enregistrements de la minute, octets, paquets, écart à la moyenne, borne
+`196 ÷ √n_minute`, `hors_borne` oui / non / vide) ; `--stabilite stabilite.csv` écrit le verdict par série
+(`stable` oui / non et motif). Une série est refusée s'il manque une minute, si une minute dépasse la borne
+élargie des pics (`max(1,5 ; z ÷ 1,96)` fois la borne, `z = Φ⁻¹(1 − 0,01 ÷ 2m)`, 1,82 pour 28 minutes) ou si
+plus de minutes sortent de leur borne que le hasard ne l'explique (loi binomiale, 4 % de risque : 4 tolérées
+sur 28). Refus à tort d'une série stable simulée : 1,2 à 2,6 %. `--cv` élargit la borne pour des tailles de
+paquets dispersées (`196 × √((1 + CV²) ÷ n)`).
+
+```bash
+uv run efv lire --resultats resultats.csv --sortie lectures.csv --series series.csv --stabilite stabilite.csv
+```
 
 ## Développement
 

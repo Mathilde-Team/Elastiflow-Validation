@@ -29,6 +29,7 @@ from typing import Protocol
 import yaml
 from loguru import logger
 
+from elastiflow_validation import stabilite
 from elastiflow_validation.injection import Banc
 
 __all__ = [
@@ -334,8 +335,12 @@ def lire_test(
     banc: Banc,
     delai_s: int = DELAI_S,
     bord_s: int = BORD_S,
+    series: list[tuple[str, str, str, list[stabilite.Minute]]] | None = None,
 ) -> list[list[str]]:
-    """Lignes de ``lectures.csv`` d'un test, une par exportateur (aucune si rien n'est indexé)."""
+    """Lignes de ``lectures.csv`` d'un test, une par exportateur (aucune si rien n'est indexé).
+
+    ``series`` : si fourni, reçoit la série par minute utile de chaque exportateur (#31).
+    """
     logger.debug("lire_test : entrée {}#{}", ligne["id"], ligne["repetition"])
     corps = requete_test(ligne, champs, banc, delai_s)
     reponse = client.requete("POST", f"/{index}/_search", corps)
@@ -358,6 +363,9 @@ def lire_test(
                 str(debut - 60), str(fin + delai_s),
             ]
         )  # fmt: skip
+        if series is not None:
+            serie = stabilite.serie_minutes(minutes, utile_bas, utile_haut)
+            series.append((ligne["id"], ligne["repetition"], str(exp["key"]), serie))
     logger.debug("lire_test : sortie {} exportateur(s)", len(lignes))
     return lignes
 
@@ -372,8 +380,14 @@ def lire(
     delai_s: int = DELAI_S,
     bord_s: int = BORD_S,
     maintenant: Callable[[], float] | None = None,
+    series: Path | None = None,
+    verdicts: Path | None = None,
+    cv: float = 0.0,
 ) -> int:
     """Lit chaque test de ``resultats`` et écrit ``sortie`` (``lectures.csv``, réécrit).
+
+    ``series`` et ``verdicts`` (facultatifs, #31) : série par minute utile de chaque test et
+    exportateur, et verdict de constance du débit (``stabilite.juger``, CV des tailles ``cv``).
 
     Les tests dont la fenêtre n'est pas close (fin + délai dans le futur) sont écartés : leurs
     enregistrements ne sont pas encore tous indexés (§9.3).
@@ -403,8 +417,11 @@ def lire(
             logger.warning("lecture différée (délai d'agrégation non écoulé) : {}", en_attente)
         tests = [t for t in tests if int(t["fin"]) + delai_s <= limite]
     lignes: list[list[str]] = []
+    collecte: list[tuple[str, str, str, list[stabilite.Minute]]] | None = None
+    if series is not None or verdicts is not None:
+        collecte = []
     for t in tests:
-        lus = lire_test(client, index, t, champs, banc, delai_s, bord_s)
+        lus = lire_test(client, index, t, champs, banc, delai_s, bord_s, collecte)
         if not lus:
             logger.warning("{}#{} : aucun enregistrement dans ElastiFlow", t["id"], t["repetition"])
         lignes += lus
@@ -412,5 +429,11 @@ def lire(
         ecrivain = csv.writer(f, lineterminator="\n")
         ecrivain.writerow(COLONNES_LECTURE)
         ecrivain.writerows(lignes)
+    if series is not None:
+        stabilite.ecrire_series(series, collecte or [], cv)
+    if verdicts is not None:
+        instables = stabilite.ecrire_verdicts(verdicts, collecte or [], cv)
+        if instables:
+            logger.warning("{} série(s) au débit non constant -> {}", instables, verdicts)
     logger.debug("lire : sortie {} test(s), {} ligne(s)", len(tests), len(lignes))
     return len(tests)

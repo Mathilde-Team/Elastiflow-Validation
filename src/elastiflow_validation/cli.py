@@ -454,6 +454,15 @@ def _ajouter_lire(sous: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--bord", type=int, default=lecture.BORD_S, help="bord exclu de la fenêtre utile, en s"
     )
+    p.add_argument(
+        "--series", type=Path, help="série par minute utile de chaque test (CSV, §9.3, #31)"
+    )
+    p.add_argument(
+        "--stabilite", type=Path, help="verdict de constance du débit par test (CSV, §10.1)"
+    )
+    p.add_argument(
+        "--cv", type=float, default=0.0, help="CV des tailles de paquets pour la borne (défaut 0)"
+    )
     banc = injection.Banc()
     p.add_argument("--serveur", default=banc.serveur, help="à défaut de colonne serveur")
     p.add_argument("--client", default=banc.client, help="à défaut de colonne client")
@@ -484,6 +493,9 @@ def commande_lire(arguments: argparse.Namespace, client: lecture.Client | None =
             delai_s=arguments.delai,
             bord_s=arguments.bord,
             maintenant=time.time,
+            series=arguments.series,
+            verdicts=arguments.stabilite,
+            cv=arguments.cv,
         )
     except (OSError, ValueError) as exc:
         logger.error("lire : {}", exc)

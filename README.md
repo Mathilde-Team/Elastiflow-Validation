@@ -15,7 +15,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 | Plan de tests (phase 0, séries A à E, QoS, G1 à G6) : disponible | `efv plan` | #3 |
 | Injection iperf2 et relevé nft vers `resultats.csv` : disponible | `efv injecter` | #4 |
 | Lecture ElastiFlow (Elasticsearch / OpenSearch) vers `lectures.csv` : disponible | `efv lire` | #5 |
-| Comparaison, verdict et document de validation rempli | `efv rapport` | #6 |
+| Comparaison, verdict et document de validation rempli : disponible | `efv rapport` | #6 |
 
 ## Installation et usage
 
@@ -33,6 +33,15 @@ uv run efv sampling                         # tableau 4.2 (plancher 5 %, 5 min, 
 uv run efv sampling 10M 1G --fenetre 1800   # 30 min d'analyse
 uv run efv sampling 20M --plancher 1 --erreur 10 --taille 500
 uv run efv sampling 10M --cv 0.83                 # erreur sur les octets, tailles 64/576/1500 o
+```
+
+`efv rapport` confronte les lectures ElastiFlow à la référence nft de `resultats.csv` et remplit les
+sections 7, 8 et 10 de VAL-ELASTIFLOW-001 (erreur, borne à 95 % `196 ÷ √n`, conformité, biais
+moyen de A2/A3/A5, comparaison avant/après correction du sampling) :
+
+```bash
+uv run efv rapport                       # resultats.csv + lectures.csv -> rapport-validation.md
+uv run efv rapport --sortie val-001.md   # sections 7, 8 et 10 remplies, verdict à signer
 ```
 
 Les formules (borne `196/√n`, n cible `(196/e)²`, erreur sur les octets `196·√((1+CV²)/n)`, détection `1 − exp(−n)`, DSCP ↔ TOS, taille IP ↔

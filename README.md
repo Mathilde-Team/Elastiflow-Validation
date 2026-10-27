@@ -44,6 +44,12 @@ uv run efv rapport                       # resultats.csv + lectures.csv -> rappo
 uv run efv rapport --sortie val-001.md   # sections 7, 8 et 10 remplies, verdict à signer
 ```
 
+Avec `--calibration calibrations/<site>.yaml`, le rapport produit aussi le **fichier de calibration
+consommé par qos-audit** (`docs/CALIBRATION.md` de ce dépôt voisin) : noms de champs P4, facteur
+d'échantillonnage P6 et marge P5 inférés des mesures, exportateurs P2 et sampling-rates observés,
+délai P7 (`--ingest-lag-minutes`). C'est un brouillon : `model`, `comware_version`, `interfaces`
+(`display sflow`), version ElastiFlow et date de signature restent à compléter à la main.
+
 Les formules (borne `196/√n`, n cible `(196/e)²`, erreur sur les octets `196·√((1+CV²)/n)`, détection `1 − exp(−n)`, DSCP ↔ TOS, taille IP ↔
 `-l` UDP ↔ trame Ethernet) sont dans `elastiflow_validation.calcul`.
 
@@ -70,6 +76,9 @@ nft `counter` par port source, un iperf2 par port (`-B CLIENT:PORT`), les tests 
 lancés ensemble, relevé des compteurs 2 s après la fin, une ligne par test ajoutée à `resultats.csv`, pause de
 5 min entre deux lancements. Les changements de sampling de l'exporteur et les préalables (`tc … netem`) sont
 annoncés et attendent la confirmation de l'opérateur ; les tests de laboratoire demandent `--lab`.
+Sans iperf2, `--outil iperf3` (§7.12) génère les commandes iperf3 (`--cport`, `-b 0` en UDP sans débit,
+`--pacing-timer 100`, rapport JSON) et donne à chaque processus simultané son serveur (`50001`, `50002`…,
+liste à lancer affichée) ; `port_destination` est alors une plage pour les tests à plusieurs processus.
 
 ```bash
 uv run efv injecter --lien 10M --test A2 --dry-run          # commandes, sans rien exécuter

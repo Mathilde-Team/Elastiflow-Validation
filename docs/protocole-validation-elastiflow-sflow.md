@@ -678,6 +678,14 @@ métadonnées de l'étape 3 (sampling-rates et DSCP lus, par exportateur) dans `
 relèvent du rapport (`efv rapport`). Elle refuse de démarrer si un champ utilisé n'existe pas dans le mapping
 (§9.2 : noms à préciser avec `--champs`).
 
+**Double échantillonnage (§5).** Un paquet prélevé à l'entrée d'un port et à la sortie d'un autre port du même
+switch produit deux enregistrements aux interfaces d'entrée et de sortie **identiques** : seules l'interface
+qui l'a prélevé (sFlow `source_id_index`) ou la comparaison à nft (volume ≈ 2×) les distinguent. `efv lire`
+écrit les octets par couple d'interfaces (`interfaces`) et, si le champ `echantillonneur` est relevé en P4 et
+déclaré dans `--champs`, la liste des échantillonneurs et `double_echantillonnage = oui` quand il y en a
+plusieurs pour un exportateur (#30, qos-audit#26). Pour l'erreur de volume, ne retenir qu'un échantillonneur
+par exportateur : celui du point de mesure.
+
 ### 9.4 Quoi lire pour chaque objectif
 
 | Objectif | Lecture dans ElastiFlow |

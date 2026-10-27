@@ -81,6 +81,9 @@ nft `counter` par port source, un iperf2 par port (`-B CLIENT:PORT`), les tests 
 lancés ensemble, relevé des compteurs 2 s après la fin, une ligne par test ajoutée à `resultats.csv`, pause de
 5 min entre deux lancements. Les changements de sampling de l'exporteur et les préalables (`tc … netem`) sont
 annoncés et attendent la confirmation de l'opérateur ; les tests de laboratoire demandent `--lab`.
+Sans iperf2, `--outil iperf3` (§7.12) génère les commandes iperf3 (`--cport`, `-b 0` en UDP sans débit,
+`--pacing-timer 100`, rapport JSON) et donne à chaque processus simultané son serveur (`50001`, `50002`…,
+liste à lancer affichée) ; `port_destination` est alors une plage pour les tests à plusieurs processus.
 
 ```bash
 uv run efv injecter --lien 10M --test A2 --dry-run          # commandes, sans rien exécuter
@@ -101,6 +104,11 @@ d'échantillonnage : `efv rapport`, #6). Les noms de champs (défauts alignés s
 `--champs champs.yaml` (`sampling: flow.sampling_interval`, clés : `horodatage`, `ip_source`,
 `ip_destination`, `port_source`, `port_destination`, `protocole`, `octets`, `paquets`, `exportateur`,
 `sampling`, `dscp`) ; chacun est vérifié dans le `_mapping` de l'index avant toute lecture (P4, #14).
+Champs facultatifs (#30), ignorés avec un avertissement s'ils manquent au mapping : `interface_entree`
+(`flow.input.ifindex`) et `interface_sortie` (`flow.output.ifindex`) donnent la colonne `interfaces`
+(octets par couple, `12>3=4500`) ; `echantillonneur` (sans défaut : champ de l'interface qui a prélevé le
+paquet, sFlow `source_id_index`, à relever en P4) donne `echantillonneurs` et `double_echantillonnage`
+(`oui` quand plusieurs échantillonneurs d'un même exportateur ont vu le test).
 
 ```bash
 export EFV_ES_URL=https://elastic.example:9200   # + EFV_ES_API_KEY, ou EFV_ES_USER et EFV_ES_PASSWORD

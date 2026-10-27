@@ -458,6 +458,41 @@ Retirer ensuite la règle : `tc qdisc del dev eth0 root`. `netem` s'applique à 
 | Fragmentation | UDP avec `-l 3000` | Les fragments suivants n'ont pas d'en-tête L4 : **pas de ports** dans ElastiFlow. |
 | Compteurs d'interface | `display counters rate inbound interface ...` | Débit calculé par ElastiFlow depuis les compteurs vs débit du switch (visible grâce au `counter interval 30`). |
 
+### 7.12 Variante iperf3
+
+> À utiliser seulement si iperf2 n'est pas disponible (Rocky 9 : iperf3 dans les dépôts de base, iperf2
+> dans EPEL). Les deux outils ne se parlent pas : client et serveur doivent être du même outil.
+> `efv injecter --outil iperf3` produit les commandes ci-dessous.
+
+| Point | iperf2 (référence) | iperf3 |
+|---|---|---|
+| Port source fixe | `-B CLIENT:PORT` | `-B CLIENT --cport PORT` |
+| Serveurs | un `iperf -s [-u] -p 50001` sert tous les processus | un serveur ne sert qu'un client à la fois (« server busy ») : un serveur par processus simultané, ports `50001`, `50002`… (`for p in 50001 50002; do iperf3 -s -p $p -D; done`, liste affichée par `efv injecter`) |
+| UDP sans débit | `-b` absent | `-b 0` (sinon 1 Mbit/s par défaut) |
+| Cadence UDP | régulière | salves toutes les 1 ms par défaut : `--pacing-timer 100` (100 µs) pour ne pas déclencher un policer (Q2 à Q4) |
+| Rapport | texte, `-e` | JSON du client et du serveur (`-J --get-server-output`) : pertes et gigue, pas de latence |
+| Connexion de contrôle | aucune | une connexion TCP vers le port du serveur, depuis un port source éphémère |
+
+Exemples sur un lien de 10 Mbit/s (`efv injecter --lien 10M --outil iperf3 --dry-run --lab --test A2 --test Q3`) :
+
+```bash
+# sur le serveur : un iperf3 par port de destination (6 tests simultanés dans Q3)
+for p in 50001 50002 50003 50004 50005 50006; do iperf3 -s -p $p -D; done
+# A2
+iperf3 -c 10.20.0.2 -u -l 972 -b 500k -p 50001 -t 1800 -i 10 -B 10.10.0.2 --cport 40004 -S 0x00 \
+       --pacing-timer 100 -J --get-server-output
+# Q3 (extrait) : les tests du groupe partent ensemble, chacun vers son serveur
+iperf3 -c 10.20.0.2 -u -l 472 -b 1M -p 50001 -t 60 -i 10 -B 10.10.0.2 --cport 40049 -S 0xb8 … &
+iperf3 -c 10.20.0.2 -u -l 472 -b 2M -p 50002 -t 60 -i 10 -B 10.10.0.2 --cport 40050 -S 0x88 … &
+iperf3 -c 10.20.0.2 -u -l 472 -b 2M -p 50003 -t 60 -i 10 -B 10.10.0.2 --cport 40051 -S 0x68 … &
+wait
+```
+
+Vérité terrain et lecture : les règles nft comptent par **port source** et `efv lire` filtre la plage de
+ports source du test, la connexion de contrôle (port source éphémère) est donc écartée des deux côtés sans
+règle supplémentaire. La colonne `port_destination` de `resultats.csv` devient une plage (`50001-50008`
+pour C3, 8 processus) que `efv lire` interroge par intervalle.
+
 ---
 
 ## 8. Qualité de service : classes de l'opérateur

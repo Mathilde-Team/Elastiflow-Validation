@@ -361,6 +361,12 @@ def _ajouter_injecter(sous: argparse._SubParsersAction) -> None:
         help=f"port du serveur iperf (défaut {banc.port_destination})",
     )
     p.add_argument(
+        "--outil",
+        choices=injection.OUTILS,
+        default=banc.outil,
+        help="générateur : iperf2 (défaut) ou iperf3 (--cport, un serveur par processus, 7.12)",
+    )
+    p.add_argument(
         "--sortie",
         type=Path,
         default=Path("resultats.csv"),
@@ -400,7 +406,9 @@ def _selectionner(execs: list[plan.Execution], selecteurs: list[str]) -> list[pl
 def commande_injecter(arguments: argparse.Namespace) -> int:
     """Injecte le plan (ou sa sélection) et complète ``resultats.csv``."""
     logger.debug("commande_injecter : {}", arguments)
-    banc = injection.Banc(arguments.serveur, arguments.client, arguments.port_destination)
+    banc = injection.Banc(
+        arguments.serveur, arguments.client, arguments.port_destination, arguments.outil
+    )
     systeme = injection.SystemeReel()
     try:
         _, execs = _charger(arguments)

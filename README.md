@@ -44,6 +44,12 @@ uv run efv rapport                       # resultats.csv + lectures.csv -> rappo
 uv run efv rapport --sortie val-001.md   # sections 7, 8 et 10 remplies, verdict à signer
 ```
 
+Avec `--calibration calibrations/<site>.yaml`, le rapport produit aussi le **fichier de calibration
+consommé par qos-audit** (`docs/CALIBRATION.md` de ce dépôt voisin) : noms de champs P4, facteur
+d'échantillonnage P6 et marge P5 inférés des mesures, exportateurs P2 et sampling-rates observés,
+délai P7 (`--ingest-lag-minutes`). C'est un brouillon : `model`, `comware_version`, `interfaces`
+(`display sflow`), version ElastiFlow et date de signature restent à compléter à la main.
+
 Les formules (borne `196/√n`, n cible `(196/e)²`, erreur sur les octets `196·√((1+CV²)/n)`, détection `1 − exp(−n)`, DSCP ↔ TOS, taille IP ↔
 `-l` UDP ↔ trame Ethernet) sont dans `elastiflow_validation.calcul`.
 

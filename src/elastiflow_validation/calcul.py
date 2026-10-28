@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Formules du protocole de validation (§3, §4, §7.3, §8.1, §12.1).
 
 - précision d'un échantillonnage sFlow : borne à 95 % ``196/√n``, n cible ``(196/e)²`` (§3.1) ;

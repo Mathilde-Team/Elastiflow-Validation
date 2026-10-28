@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Lecture dans ElastiFlow : une requête d'agrégation par test de ``resultats.csv`` (§9, issue #5).
 
 Pour chaque ligne : filtre sur la clé connue (IP source et destination, ports source, port de

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Lecture dans ElastiFlow (#5) : requête par test, sommes utiles, champs, connexion, CLI."""
 
 from __future__ import annotations

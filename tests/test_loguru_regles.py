@@ -27,13 +27,13 @@ from __future__ import annotations
 import ast
 import importlib.util
 import io
-from contextlib import redirect_stdout
 import re
 import string
 import subprocess
 import sys
 import unittest
 import warnings
+from contextlib import redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -94,9 +94,7 @@ def a_un_logger_de_module(tree: ast.Module) -> bool:
     for node in tree.body:
         if isinstance(node, (ast.Try, ast.If)):
             statements += (
-                node.body
-                + node.orelse
-                + [s for h in getattr(node, "handlers", []) for s in h.body]
+                node.body + node.orelse + [s for h in getattr(node, "handlers", []) for s in h.body]
             )
     for node in statements:
         if isinstance(node, ast.ImportFrom) and node.module == "loguru":
@@ -243,7 +241,8 @@ class TestReglesLoguru(unittest.TestCase):
         self.assertLessEqual(
             total,
             reference,
-            "nouvelles fonctions sans debug() en entrée/sortie : scripts/audit_debug_sorties.py --details",
+            "nouvelles fonctions sans debug() en entrée/sortie : "
+            "scripts/audit_debug_sorties.py --details",
         )
 
 
@@ -252,15 +251,14 @@ class TestDetecteurs(unittest.TestCase):
 
     def test_except(self):
         """Un except muet compte, un except journalisé non."""
-        tree = ast.parse(
-            "try:\n    x()\nexcept A:\n    pass\nexcept B:\n    logger.warning('b')\n"
-        )
+        tree = ast.parse("try:\n    x()\nexcept A:\n    pass\nexcept B:\n    logger.warning('b')\n")
         self.assertEqual(except_sans_journal(tree), 1)
 
     def test_format(self):
         """Champ manquant et %s détectés ; f-string et format correct acceptés."""
         tree = ast.parse(
-            'logger.info("a {} b {}", x)\nlogger.info("a %s", x)\nlogger.info("ok {}", x)\nlogger.info(f"{x}")\n'
+            'logger.info("a {} b {}", x)\nlogger.info("a %s", x)\n'
+            'logger.info("ok {}", x)\nlogger.info(f"{x}")\n'
         )
         self.assertEqual([e.split(":")[0] for e in erreurs_de_format(tree)], ["1", "2"])
 
@@ -276,7 +274,8 @@ class TestDetecteurs(unittest.TestCase):
         """Fonction tracée en entrée et à chaque sortie conforme, l'autre non."""
         audit = _audit()
         source = (
-            "def ok(x):\n    logger.debug('in')\n    if x:\n        logger.debug('out')\n        return 1\n"
+            "def ok(x):\n    logger.debug('in')\n    if x:\n"
+            "        logger.debug('out')\n        return 1\n"
             "    logger.debug('out')\n    return 2\n"
             "def ko(x):\n    if x:\n        return 1\n    return 2\n"
         )
@@ -366,13 +365,8 @@ class TestDetecteurs(unittest.TestCase):
         """if sans else et fin implicite non tracée : écart de sortie."""
         audit = _audit()
         sources = [
-            "def ko(x):\n"
-            "    logger.debug('in')\n"
-            "    if x:\n"
-            "        logger.debug('a')\n",
-            "def ko(x):\n"
-            "    logger.debug('in')\n"
-            "    y = x\n",
+            "def ko(x):\n    logger.debug('in')\n    if x:\n        logger.debug('a')\n",
+            "def ko(x):\n    logger.debug('in')\n    y = x\n",
         ]
         for source in sources:
             self.assertEqual([p for _, _, p in audit.audit_source(source)], [["sortie"]])

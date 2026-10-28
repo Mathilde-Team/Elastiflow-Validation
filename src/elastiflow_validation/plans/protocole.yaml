@@ -1,0 +1,178 @@
+# Plan de tests du protocole (protocole-validation-elastiflow-sflow.md, 7.6 à 8.3).
+#
+# Débit : « 5% » (du lien), « 150% cir » (du débit contractuel de la classe, option --cir),
+# « 500k » / « 2M » (absolu) ou « max ». Taille : taille IP en octets (-l = taille - 28).
+# DSCP : classe (EF, AF41, D1…) ou valeur 0-63 ; « tos » pour un octet TOS brut (ECN).
+# Sampling : « nominal » (tableau 4.2) ou N (1:N) pendant le test.
+# Les ports sources sont attribués dans l'ordre du fichier : 40000 + N, N à partir de 1,
+# un port par processus iperf. Les tests d'un même « groupe » partent simultanément.
+# Recette qos-audit (#16) : « attendu » (verdicts controle:GRAVITE), « port_destination » (port du serveur).
+version: 1
+tests:
+  # Phase 0 : calibrage (7.6)
+  - {id: P5, serie: "0", protocole: udp, debit: 500k, taille: 1000, dscp: BF, duree: 120, sampling: 1,
+     objectif: "Calibrage à 1:1 : total ElastiFlow = compteurs nft ; base IP ou trame"}
+  - {id: P6, serie: "0", protocole: udp, debit: 500k, taille: 1000, dscp: BF, duree: 120, sampling: 8,
+     objectif: "Facteur d'échantillonnage : même total qu'à 1:1"}
+
+  # Série A : débit constant, UDP, 30 min, paquets IP de 1000 o, DSCP 0 (7.8)
+  - {id: A1, serie: A, protocole: udp, debit: 1%, taille: 1000, dscp: BF, duree: 1800,
+     objectif: "Sous le plancher : probabilité de détection"}
+  - {id: A2, serie: A, protocole: udp, debit: 5%, taille: 1000, dscp: BF, duree: 1800, repetitions: 3,
+     objectif: "Plancher visé : erreur ≤ 5 %"}
+  - {id: A3, serie: A, protocole: udp, debit: 10%, taille: 1000, dscp: BF, duree: 1800, repetitions: 3,
+     objectif: "Erreur dans la borne à 95 %"}
+  - {id: A4, serie: A, protocole: udp, debit: 25%, taille: 1000, dscp: BF, duree: 1800,
+     objectif: "Erreur dans la borne à 95 %"}
+  - {id: A5, serie: A, protocole: udp, debit: 50%, taille: 1000, dscp: BF, duree: 1800, repetitions: 3,
+     objectif: "Erreur dans la borne à 95 %"}
+  - {id: A6, serie: A, protocole: udp, debit: 90%, taille: 1000, dscp: BF, duree: 1800,
+     objectif: "Plafond : proche du maximum, sans perte"}
+  - {id: A1-4096, serie: A, protocole: udp, debit: 1%, taille: 1000, dscp: BF, duree: 1800, sampling: 4096,
+     objectif: "Sampling historique 1:4096 : chiffrer le problème"}
+  - {id: A2-4096, serie: A, protocole: udp, debit: 5%, taille: 1000, dscp: BF, duree: 1800, sampling: 4096,
+     objectif: "Sampling historique 1:4096 : chiffrer le problème"}
+  - {id: A3-4096, serie: A, protocole: udp, debit: 10%, taille: 1000, dscp: BF, duree: 1800, sampling: 4096,
+     objectif: "Sampling historique 1:4096 : chiffrer le problème"}
+
+  # Série B : taille des paquets, UDP, 10 min, 10 % du lien, DSCP 0
+  - {id: B1, serie: B, protocole: udp, debit: 10%, taille: 100, dscp: BF, duree: 600,
+     objectif: "Volume juste, nombre de paquets cohérent"}
+  - {id: B2, serie: B, protocole: udp, debit: 10%, taille: 200, dscp: BF, duree: 600, objectif: idem}
+  - {id: B3, serie: B, protocole: udp, debit: 10%, taille: 500, dscp: BF, duree: 600, objectif: idem}
+  - {id: B4, serie: B, protocole: udp, debit: 10%, taille: 1000, dscp: BF, duree: 600, objectif: idem}
+  - {id: B5, serie: B, protocole: udp, debit: 10%, taille: 1500, dscp: BF, duree: 600, objectif: idem}
+
+  # Série C : TCP
+  - {id: C1, serie: C, protocole: tcp, debit: max, volume: 1G, dscp: BF,
+     objectif: "Volume exact de 1 Go ; SYN et FIN visibles"}
+  - {id: C2, serie: C, protocole: tcp, debit: 25%, dscp: BF, duree: 1800,
+     objectif: "Débit constant : erreur dans la borne à 95 %"}
+  - {id: C3, serie: C, protocole: tcp, debit: max, dscp: BF, duree: 600, processus: 8,
+     objectif: "Débit maximum (8 processus) ; sens retour (ACK) présent"}
+
+  # Série D : répétitions (7.9 b), interface de test dédiée
+  - {id: D1, serie: D, protocole: udp, debit: 10%, taille: 1000, dscp: BF, duree: 600,
+     prealable: "tc qdisc add dev eth0 root netem duplicate 5%",
+     objectif: "Volume ElastiFlow ≈ +5 % du volume applicatif"}
+  - {id: D2, serie: D, protocole: tcp, debit: max, dscp: BF, duree: 600,
+     prealable: "tc qdisc add dev eth0 root netem loss 2%",
+     objectif: "Volume supérieur au volume utile, à hauteur des retransmissions"}
+
+  # Série E : saturation (7.10), lab uniquement
+  - {id: E1, serie: E, protocole: udp, debit: 150%, taille: 1500, dscp: BF, duree: 60, repetitions: 3,
+     sampling: 8, lab: true, objectif: "Charge offerte vue au point A ; pertes côté serveur"}
+
+  # Q1 : marquage conservé (8.3), 10 min par valeur, 5 % du lien, paquets IP de 500 o
+  - {id: Q1-1, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: EF, duree: 600, objectif: "DSCP A = DSCP B"}
+  - {id: Q1-2, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: AF41, duree: 600, objectif: idem}
+  - {id: Q1-3, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: D1, duree: 600, objectif: idem}
+  - {id: Q1-4, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: D2, duree: 600, objectif: idem}
+  - {id: Q1-5, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: D3, duree: 600, objectif: idem}
+  - {id: Q1-6, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: BF, duree: 600, objectif: idem}
+  - {id: Q1-7, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: DSCP45, duree: 600,
+     objectif: "Hypothèse alternative d'EF (DSCP 45)"}
+
+  # Q2 : profil par classe, 5 min par palier (50, 100 et 150 % du débit contractuel)
+  - {id: Q2-EF-50, serie: Q, protocole: udp, debit: 50% cir, taille: 500, dscp: EF, duree: 300, objectif: "Dans le profil"}
+  - {id: Q2-EF-100, serie: Q, protocole: udp, debit: 100% cir, taille: 500, dscp: EF, duree: 300, objectif: "Au profil"}
+  - {id: Q2-EF-150, serie: Q, protocole: udp, debit: 150% cir, taille: 500, dscp: EF, duree: 300,
+     objectif: "Excédent rejeté ou remarqué"}
+  - {id: Q2-AF41-50, serie: Q, protocole: udp, debit: 50% cir, taille: 500, dscp: AF41, duree: 300, objectif: "Dans le profil"}
+  - {id: Q2-AF41-100, serie: Q, protocole: udp, debit: 100% cir, taille: 500, dscp: AF41, duree: 300, objectif: "Au profil"}
+  - {id: Q2-AF41-150, serie: Q, protocole: udp, debit: 150% cir, taille: 500, dscp: AF41, duree: 300,
+     objectif: "Excédent rejeté ou remarqué"}
+  - {id: Q2-D1-50, serie: Q, protocole: udp, debit: 50% cir, taille: 500, dscp: D1, duree: 300, objectif: "Dans le profil"}
+  - {id: Q2-D1-100, serie: Q, protocole: udp, debit: 100% cir, taille: 500, dscp: D1, duree: 300, objectif: "Au profil"}
+  - {id: Q2-D1-150, serie: Q, protocole: udp, debit: 150% cir, taille: 500, dscp: D1, duree: 300,
+     objectif: "Excédent rejeté ou remarqué"}
+  - {id: Q2-BF-50, serie: Q, protocole: udp, debit: 50% cir, taille: 500, dscp: BF, duree: 300, objectif: "Dans le profil"}
+  - {id: Q2-BF-100, serie: Q, protocole: udp, debit: 100% cir, taille: 500, dscp: BF, duree: 300, objectif: "Au profil"}
+  - {id: Q2-BF-150, serie: Q, protocole: udp, debit: 150% cir, taille: 500, dscp: BF, duree: 300,
+     objectif: "Excédent rejeté ou remarqué"}
+
+  # Q3 : congestion multi-classes (60 s, trois répétitions, lab uniquement), flux simultanés
+  - {id: Q3-EF, serie: Q, groupe: Q3, protocole: udp, debit: 10%, taille: 500, dscp: EF, duree: 60, repetitions: 3,
+     lab: true, objectif: "Intact (pertes nulles, gigue basse)"}
+  - {id: Q3-AF41, serie: Q, groupe: Q3, protocole: udp, debit: 20%, taille: 500, dscp: AF41, duree: 60, repetitions: 3,
+     lab: true, objectif: "Intact"}
+  - {id: Q3-D1, serie: Q, groupe: Q3, protocole: udp, debit: 20%, taille: 500, dscp: D1, duree: 60, repetitions: 3,
+     lab: true, objectif: "Pertes faibles"}
+  - {id: Q3-D2, serie: Q, groupe: Q3, protocole: udp, debit: 20%, taille: 500, dscp: D2, duree: 60, repetitions: 3,
+     lab: true, objectif: "Pertes moyennes"}
+  - {id: Q3-D3, serie: Q, groupe: Q3, protocole: udp, debit: 10%, taille: 500, dscp: D3, duree: 60, repetitions: 3,
+     lab: true, objectif: "Pertes élevées"}
+  - {id: Q3-BF, serie: Q, groupe: Q3, protocole: udp, debit: 50%, taille: 500, dscp: BF, duree: 60, repetitions: 3,
+     lab: true, objectif: "Plus forte perte"}
+
+  # Q4 : excès sur la classe prioritaire, EF à 150 % de son profil, BF dans son profil
+  - {id: Q4-EF, serie: Q, groupe: Q4, protocole: udp, debit: 150% cir, taille: 500, dscp: EF, duree: 60,
+     objectif: "Devenir de l'excès d'EF"}
+  - {id: Q4-BF, serie: Q, groupe: Q4, protocole: udp, debit: 100% cir, taille: 500, dscp: BF, duree: 60,
+     objectif: "BF non pénalisé"}
+
+  # Q5 : valeurs inhabituelles (5 min chacune, 5 % du lien)
+  - {id: Q5-1, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: CS6, duree: 300, objectif: "Traitement opérateur ; DSCP restitué"}
+  - {id: Q5-2, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: CS5, duree: 300, objectif: idem}
+  - {id: Q5-3, serie: Q, protocole: udp, debit: 5%, taille: 500, dscp: CS1, duree: 300, objectif: idem}
+  - {id: Q5-4a, serie: Q, protocole: udp, debit: 5%, taille: 500, tos: 0x01, duree: 300, objectif: "ECN seul (ECT(1))"}
+  - {id: Q5-4b, serie: Q, protocole: udp, debit: 5%, taille: 500, tos: 0x02, duree: 300, objectif: "ECN seul (ECT(0))"}
+  - {id: Q5-4c, serie: Q, protocole: udp, debit: 5%, taille: 500, tos: 0x03, duree: 300, objectif: "ECN seul (CE)"}
+
+  # Tests hors iperf : à mener à la main (8.4, 7.11)
+  - {id: Q6, serie: Q, manuel: "CoS 802.1p : sous-interface VLAN avec egress-qos-map"}
+  - {id: G1, serie: G, manuel: "Deux VLAN (routage inter-VLAN) : VLAN et interfaces d'entrée et de sortie"}
+  - {id: G2, serie: G, manuel: "ICMP : ping -i 0.2 -s 1000 -t 64 SERVEUR"}
+  - {id: G3, serie: G, manuel: "Flags TCP : connexions courtes en nombre connu (hping3 / nping)"}
+  - {id: G4, serie: G, manuel: "IPv6 : mêmes tests en IPv6"}
+  - {id: G5, serie: G, manuel: "Fragmentation : UDP -l 3000"}
+  - {id: G6, serie: G, manuel: "Compteurs d'interface : display counters rate inbound interface"}
+
+  # Série R : recette de qos-audit (#16, qos-audit#36). Chaque test injecte un défaut connu ;
+  # « attendu » porte le verdict qos-audit attendu (controle:GRAVITE) sur la fenêtre du test.
+  # En fin de fichier pour ne pas décaler les ports source des autres tests.
+  - {id: R1, serie: R, protocole: udp, debit: 2%, taille: 200, tos: 0, duree: 600,
+     port_destination: 20000, attendu: ["marking:CRIT"],
+     prealable: "ACL voix de la politique qos-audit couvrant le port 20000 ; serveur : iperf -s -u -p 20000",
+     objectif: "Voix (port RTP, petits paquets) émise en TOS 0"}
+  - {id: R2, serie: R, protocole: udp, debit: 5%, taille: 500, dscp: EF, duree: 600,
+     attendu: ["trust:CRIT"], prealable: "Brancher le client sur un port non fiable (trust non déclaré)",
+     objectif: "EF entrant par un port non fiable"}
+  - {id: R3, serie: R, protocole: udp, debit: 5%, taille: 500, dscp: 40, duree: 600,
+     attendu: ["dscp_plan:WARN"], objectif: "DSCP hors plan (CS5)"}
+  - {id: R4, serie: R, protocole: udp, debit: 150%, taille: 1000, dscp: EF, duree: 600, lab: true,
+     attendu: ["saturation:CRIT", "class_overflow:WARN"], objectif: "Charge offerte à 150 % du lien en EF"}
+  - {id: R5, serie: R, protocole: udp, debit: 5%, taille: 1000, dscp: BF, duree: 600, lab: true,
+     attendu: ["exit_balance:WARN"], prealable: "Couper la sortie principale : bascule sur le secours",
+     objectif: "Trafic sur la sortie de secours"}
+  - {id: R6, serie: R, protocole: udp, debit: 5%, taille: 1000, dscp: BF, duree: 600, sampling: 4096,
+     attendu: ["sampling_adequacy:CRIT"],
+     prealable: "Sortie du banc déclarée à 10 Mbit/s dans la politique qos-audit",
+     objectif: "Sampling 1:4096 trop grossier pour une sortie à 10 Mbit/s"}
+
+  # Série S : sondes de production (#17, protocole 8.8, qos-audit#29). Légères (64 kbit/s par classe),
+  # dans le profil, les six classes en même temps pour comparer leurs pertes et gigue au même instant.
+  # À relancer toutes les 15 min en production ; en fin de fichier pour ne pas décaler les autres ports.
+  - {id: S-EF, serie: S, groupe: S, protocole: udp, debit: 64k, taille: 200, dscp: EF, duree: 30,
+     objectif: "Sonde EF : pertes et gigue de référence"}
+  - {id: S-AF41, serie: S, groupe: S, protocole: udp, debit: 64k, taille: 200, dscp: AF41, duree: 30,
+     objectif: "Sonde AF41"}
+  - {id: S-D1, serie: S, groupe: S, protocole: udp, debit: 64k, taille: 200, dscp: D1, duree: 30,
+     objectif: "Sonde D1"}
+  - {id: S-D2, serie: S, groupe: S, protocole: udp, debit: 64k, taille: 200, dscp: D2, duree: 30,
+     objectif: "Sonde D2"}
+  - {id: S-D3, serie: S, groupe: S, protocole: udp, debit: 64k, taille: 200, dscp: D3, duree: 30,
+     objectif: "Sonde D3"}
+  - {id: S-BF, serie: S, groupe: S, protocole: udp, debit: 64k, taille: 200, dscp: BF, duree: 30,
+     objectif: "Sonde BF : EF dégradée et BF intacte = priorisation inversée"}
+
+# Sous-ensembles du plan (efv plan --profil NOM). Sélecteur : identifiant, motif (Q1-*) ou groupe.
+# Les tests de phase 0 hors iperf (P1 à P4, P7 à P9) restent des prérequis de tout profil (7.6).
+profils:
+  # Environ 1 jour (issue #11) : de quoi produire une calibration exploitable par qos-audit.
+  # Un « Validé » sur ce profil ne vaut pas validation complète (protocole 11, VAL-ELASTIFLOW-001).
+  minimal: [P5, P6, A2, A3, B1, B5, Q1-*, Q2-*, Q3, G1, G6]
+  # Recette de qos-audit (#16) : défauts connus et verdicts attendus.
+  recette: [R*]
+  # Sondes de production (#17) : une passe de 30 s, à planifier toutes les 15 min (protocole 8.8).
+  sonde: [S*]

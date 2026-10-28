@@ -291,7 +291,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{path}:{line}: {name} ({', '.join(problems)})")
     else:
         print(
-            f"{total} fonction(s) sans debug() en entrée ou à chaque sortie (référence : {read_baseline()})"
+            f"{total} fonction(s) sans debug() en entrée ou à chaque sortie "
+            f"(référence : {read_baseline()})"
         )
         for path, count in Counter({p: len(f) for p, f in result.items()}).most_common(20):
             print(f"{count:6d}  {path}")

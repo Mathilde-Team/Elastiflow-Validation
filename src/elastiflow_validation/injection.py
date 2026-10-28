@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Injection (protocole §7.7) : pilotage d'iperf2 ou d'iperf3, relevé de la vérité terrain nft.
 
 Remplace ``run_test.sh``. Pour chaque lancement du plan (un test, ou les tests d'un groupe partis

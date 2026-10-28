@@ -133,7 +133,7 @@ Ce dépôt est créé depuis [`modele-depot`](https://github.com/Mathilde-Team/m
 - **Garde** : `.github/workflows/guard-main.yml` refuse les PR vers `main` qui ne viennent pas de `dev`.
 - **Mise à jour des PR** : `.github/workflows/maj-branches.yml` met à jour les PR vers `dev` à chaque avancée de `dev`, et fait résoudre les conflits simples par l'IA locale (SOCLE §11). Label `pas-de-maj-auto` pour exclure une PR ; une PR `resolu-par-ia` repasse en brouillon : la relire avant *Ready for review*.
 - **Protections versionnées** : `.github/branch-protection/{main,dev}.json`, vérifiées chaque jour par le workflow « Protection des branches ».
-- **Licence** : [MIT](LICENSE).
+- **Licence** : [GPL-3.0-or-later](LICENSE) (SOCLE §1) : texte officiel de la GPLv3 dans `LICENSE`, `license = "GPL-3.0-or-later"` dans `pyproject.toml`, en-tête `# SPDX-License-Identifier: GPL-3.0-or-later` en tête de chaque fichier Python et shell.
 - **Couverture des tests** : seuil bloquant de **95 %**, branches comprises (décision d'équipe du 21/10/2026, [.github#9](https://github.com/Mathilde-Team/.github/issues/9)). Le seuil est déclaré une seule fois, dans `pyproject.toml` (`[tool.coverage.report] fail_under = 95`, `[tool.coverage.run] branch = true`) ; le job Qualité le lit (`make test`) sans le recopier.
 
 ### Couverture des tests

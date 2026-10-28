@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Lecture par interface et échantillonneur (#30) : double échantillonnage, champs facultatifs."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests de scripts/check_branch_protection.py, sans réseau (urlopen simulé)."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Rapport de validation : comparaison ElastiFlow / référence et document VAL-ELASTIFLOW-001 (§10,
 issue #6).
 

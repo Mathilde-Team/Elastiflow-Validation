@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests du rapport de validation : comparaison, bornes à 95 % et document VAL-ELASTIFLOW-001."""
 
 from __future__ import annotations

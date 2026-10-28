@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Variante iperf3 de l'injection (#32) : --cport, un serveur par processus, lecture en plage."""
 
 from __future__ import annotations

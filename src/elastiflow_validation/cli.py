@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Ligne de commande ``efv``.
 
 Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3), ``injecter`` (#4), ``lire`` (#5),

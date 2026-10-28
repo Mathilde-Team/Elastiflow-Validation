@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Injection (#4) : commandes iperf2, compteurs nft, resultats.csv, avec un système simulé."""
 
 from __future__ import annotations

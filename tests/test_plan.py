@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Plan de tests YAML (#3) : chargement validé, ports, conversion en débits absolus, efv plan."""
 
 from __future__ import annotations

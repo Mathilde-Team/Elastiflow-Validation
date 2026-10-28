@@ -5,7 +5,7 @@ name = "elastiflow-validation"
 version = "0.1.0"
 description = "Contre-expertise d'ElastiFlow par injection de trafic iperf2 et lecture sFlow"
 readme = "README.md"
-license = "MIT"
+license = "GPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
     # Journalisation (SOCLE §8) : loguru pour tout le Python de l'équipe.

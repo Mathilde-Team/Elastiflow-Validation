@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import csv
 import math
+import random
+import statistics
 from pathlib import Path
 
 import pytest
@@ -97,7 +99,9 @@ def test_analyser_calcul_erreur_borne_conformite(tmp_path):
     a = analyses[0]
     assert a.erreur_pct == pytest.approx(0.5)
     assert a.n_attendu == pytest.approx(1000.0)
-    assert a.borne_pct == pytest.approx(196.0 / math.sqrt(1000.0))
+    # m = 1 mesure : la borne Bonferroni se confond avec la borne à 95 % (196/√n).
+    assert a.borne_pct == pytest.approx(rapport._z_bonferroni(1) * 100.0 / math.sqrt(1000.0))
+    assert a.borne95_pct == pytest.approx(196.0 / math.sqrt(1000.0))
     assert a.conforme is True
     assert a.cle == "A3 (1)"
 
@@ -213,6 +217,139 @@ def test_rapport_ecrit_le_document(tmp_path):
     sortie = tmp_path / "rapport-validation.md"
     assert rapport.rapport(resultats, lectures, sortie) == 1
     assert "## 8. Synthèse chiffrée des erreurs" in sortie.read_text(encoding="utf-8")
+
+
+# --- Verdict global (protocole §10.3, issue #9 : option B, Bonferroni) ----------
+
+
+def _mesure(
+    erreur: float | None,
+    n_attendu: float = 1000.0,
+    id: str = "A1",
+    m: int = 1,
+) -> rapport.Analyse:
+    """Analyse minimale : conformité à la borne Bonferroni z(m)·100/√n."""
+    z = rapport._z_bonferroni(m)
+    borne = z * 100.0 / n_attendu**0.5 if n_attendu else None
+    borne95 = 196.0 / n_attendu**0.5 if n_attendu else None
+    conforme = None if erreur is None or borne is None else abs(erreur) <= borne
+    return rapport.Analyse(
+        id=id,
+        repetition="1",
+        exportateur="sw-a",
+        protocole="udp",
+        debit="5%",
+        taille="1000",
+        tos="0x00",
+        debut=0,
+        fin=0,
+        paquets_reference=1,
+        octets_reference=1,
+        octets_elastiflow=1,
+        paquets_elastiflow=1,
+        enregistrements=1,
+        sampling=1,
+        sampling_lu="",
+        n_attendu=n_attendu,
+        erreur_pct=erreur,
+        borne_pct=borne,
+        borne95_pct=borne95,
+        conforme=conforme,
+    )
+
+
+def _tirage_sans_biais(nb: int, alea: random.Random) -> list[rapport.Analyse]:
+    """Mesures d'un instrument juste : erreur ~ N(0, 100/√n), dépassement à 5 % par mesure."""
+    return [
+        _mesure(alea.gauss(0.0, 100.0 / 1000.0**0.5), id=f"T{i}", m=nb) for i in range(nb)
+    ]
+
+
+def test_z_bonferroni_selon_le_nombre_de_mesures():
+    # z(1) = 1,96 (borne à 95 % simple) ; z(22) ≈ 3,05 (décision du 28/10/2026).
+    assert rapport._z_bonferroni(1) == pytest.approx(1.96, abs=0.01)
+    assert rapport._z_bonferroni(22) == pytest.approx(3.05, abs=0.01)
+    assert rapport._z_bonferroni(0) == pytest.approx(1.96)
+
+
+def test_verdict_toutes_dans_la_borne_bonferroni():
+    # 22 mesures dont une au-delà de la borne à 95 % seule mais conforme à la
+    # borne Bonferroni (critère de conformité et de verdict) : Validé.
+    mesures = [_mesure(0.0, m=22)] * 21 + [_mesure(7.0, m=22)]
+    v = rapport.verdict_global(mesures)
+    assert v.verdict is True
+    assert v.nb_mesures == 22
+    assert v.nb_hors_borne == 0
+    assert v.z_bonferroni == pytest.approx(3.05, abs=0.01)
+    assert mesures[-1].borne95_pct < mesures[-1].erreur_pct < mesures[-1].borne_pct
+
+
+def test_verdict_une_mesure_hors_borne_bonferroni_refuse():
+    # 10,5 % > borne Bonferroni 3,05·100/√1000 ≈ 9,6 % : refusé.
+    mesures = [_mesure(0.0, m=22)] * 21 + [_mesure(10.5, m=22)]
+    v = rapport.verdict_global(mesures)
+    assert v.verdict is False
+    assert v.nb_hors_borne == 1
+
+
+def test_verdict_jeu_incomplet_non_lus_non_calculable():
+    mesures = [_mesure(0.0)] * 3
+    v = rapport.verdict_global(mesures, non_lus=["A9 (1)"])
+    assert v.verdict is None
+    assert "sans lecture" in v.non_calculable
+
+
+def test_verdict_mesure_non_calculable():
+    v = rapport.verdict_global([_mesure(0.0), _mesure(None)])
+    assert v.verdict is None
+    assert "non calculable" in v.non_calculable
+
+
+def test_verdict_aucune_mesure():
+    assert rapport.verdict_global([]).verdict is None
+    assert rapport.verdict_global([], non_lus=["A1 (1)"]).verdict is None
+
+
+def test_verdict_jeu_complet_22_mesures_sans_biais():
+    # Critère d'acceptation de l'issue #9, prouvé exact : P(toutes dans la borne
+    # Bonferroni) = (1 − 2Φ(−z))²² ≥ 95 %.
+    z = rapport._z_bonferroni(22)
+    p_mesure = 2 * (1 - statistics.NormalDist().cdf(z))
+    assert (1 - p_mesure) ** 22 >= 0.95
+
+
+def test_verdict_monte_carlo_calibre_sur_la_probabilite_exacte():
+    # Contrôle de calibration du tirage (graine fixe) : le taux observé sur
+    # 2000 tirages est compatible avec la probabilité exacte (±3σ binomial).
+    alea = random.Random(20261029)
+    z = rapport._z_bonferroni(22)
+    p_exact = (1 - 2 * (1 - statistics.NormalDist().cdf(z))) ** 22
+    valides = sum(
+        1 for _ in range(2000) if rapport.verdict_global(_tirage_sans_biais(22, alea)).verdict
+    )
+    sigma = (p_exact * (1 - p_exact) / 2000) ** 0.5
+    assert abs(valides / 2000 - p_exact) <= 3 * sigma
+
+
+def test_construire_document_contient_le_verdict(tmp_path):
+    lignes = [_test_reference("A2", str(i), octets="1000000") for i in (1, 2)]
+    lectures_lignes = [_lecture("A2", str(i), octets="1010000") for i in (1, 2)]
+    analyses, non_lus = rapport.analyser(
+        _resultats(tmp_path, lignes), _lectures(tmp_path, lectures_lignes)
+    )
+    texte = rapport.construire_document(analyses, non_lus)
+    assert "**Verdict global**" in texte
+    assert "| 2 | 0 | 2.24 | Validé |" in texte  # z(2) = 2,24
+    assert "**Verdict** : à compléter et signer" in texte  # la décision reste humaine
+
+
+def test_construire_document_verdict_jeu_incomplet(tmp_path):
+    resultats = _resultats(tmp_path, [_test_reference("A1"), _test_reference("A9")])
+    lectures = _lectures(tmp_path, [_lecture("A1")])  # A9 sans lecture
+    analyses, non_lus = rapport.analyser(resultats, lectures)
+    texte = rapport.construire_document(analyses, non_lus)
+    assert "non calculable" in texte
+    assert "sans lecture" in texte
 
 
 def test_cli_rapport(tmp_path, capsys):

@@ -7,8 +7,16 @@ Pour chaque test de ``resultats.csv`` lu dans ``lectures.csv`` (jointure sur ``i
 
 - erreur (%) = (octets ElastiFlow − octets de référence) ÷ octets de référence × 100 ;
 - n attendu = paquets réels ÷ sampling-rate du test ;
-- borne à 95 % = 196 ÷ √n (protocole §10.3) ;
-- conforme : |erreur| ≤ borne.
+- borne Bonferroni = z(m)·100 ÷ √n, commune aux m mesures évaluées (issue #9) ;
+- conforme : |erreur| ≤ borne (la borne à 95 % seule, 196 ÷ √n, est une
+  information secondaire).
+
+Le verdict global (issue #9, décision d'équipe du 28/10/2026 : option B) applique la
+correction de Bonferroni : borne z(m)·100/√n commune aux m mesures évaluées —
+z(22) = 3,05 — le critère de conformité de chaque mesure et le verdict global
+(toutes les mesures doivent y rester). La borne à 95 % par mesure (196/√n) reste
+une information secondaire de diagnostic ; un jeu incomplet (test sans lecture,
+mesure non calculable) ne peut pas être validé : verdict non calculable.
 
 Le biais moyen couvre les répétitions de A2, A3 et A5 (VAL §8) ; la comparaison avant/après
 correction du sampling apparie chaque test ``X-4096`` à son homologue ``X``. Le document produit
@@ -24,12 +32,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import NormalDist
 
 import yaml
 from loguru import logger
 
 __all__ = [
     "Analyse",
+    "VerdictGlobal",
     "analyser",
     "biais_moyen",
     "comparaison_sampling",
@@ -37,9 +47,13 @@ __all__ = [
     "construire_document",
     "ecrire_calibration",
     "rapport",
+    "verdict_global",
 ]
 
 BORNE = 196.0
+# Risque global d'échec à tort du verdict (protocole §10.3, décision du 28/10/2026,
+# issue #9) : correction de Bonferroni, borne z(m)·100/√n au lieu de 196/√n.
+RISQUE_GLOBAL = 0.05
 SERIES_BIAIS = ("A2", "A3", "A5")
 SUFFIXE_ANCIEN_SAMPLING = "-4096"
 # Clés de lecture (CHAMPS_DEFAUT) traduites vers les clés de ``elastiflow.FIELDS`` de qos-audit.
@@ -80,12 +94,81 @@ class Analyse:
     n_attendu: float
     erreur_pct: float | None
     borne_pct: float | None
+    borne95_pct: float | None
     conforme: bool | None
 
     @property
     def cle(self) -> str:
         """Identifiant lisible : ``A2 (2)``."""
         return f"{self.id} ({self.repetition})"
+
+
+@dataclass(frozen=True)
+class VerdictGlobal:
+    """Verdict global : toutes les mesures dans la borne Bonferroni (issue #9).
+
+    Décision d'équipe du 28/10/2026 (MathildeDec) : option B. La conformité de chaque
+    mesure et le verdict global suivent la borne Bonferroni z(m)·100/√n —
+    z(m) = Φ⁻¹(1 − 0,05/2m), soit 3,05 pour les 22 mesures de la campagne — et
+    exigent que TOUTES les mesures y restent : par l'inégalité de Boole,
+    P(au moins un dépassement par hasard) ≤ m·(0,05/m) = 5 %, sans hypothèse
+    d'indépendance. La borne à 95 % seule (196/√n, ``borne95_pct``) reste une
+    information secondaire de diagnostic. Un jeu incomplet (mesure sans lecture
+    ou non calculable) ne peut pas être validé : le verdict est alors ``None``
+    avec son motif.
+    """
+
+    nb_mesures: int
+    nb_hors_borne: int
+    z_bonferroni: float
+    verdict: bool | None
+    non_calculable: str | None
+
+
+def _z_bonferroni(nb_mesures: int) -> float:
+    """z de la borne Bonferroni : Φ⁻¹(1 − 0,05/2m) ; 1,96 pour m = 1, 3,05 pour m = 22."""
+    logger.debug("_z_bonferroni : entrée | {} mesure(s)", nb_mesures)
+    if nb_mesures <= 0:
+        z = 1.96
+        logger.debug("_z_bonferroni : sortie | z = {}", z)
+        return z
+    z = NormalDist().inv_cdf(1 - RISQUE_GLOBAL / (2 * nb_mesures))
+    logger.debug("_z_bonferroni : sortie | z = {:.4f}", z)
+    return z
+
+
+def verdict_global(
+    analyses: Sequence[Analyse], non_lus: Sequence[str] = ()
+) -> VerdictGlobal:
+    """Toutes les mesures dans la borne Bonferroni (protocole §10.3, issue #9).
+
+    Un jeu incomplet ne peut pas être validé : un test sans lecture ElastiFlow ou une
+    mesure non calculable rend le verdict ``None`` (motif dans ``non_calculable``) —
+    un sous-ensemble prévu et un jeu incomplet ne sont pas équivalents.
+    """
+    logger.debug(
+        "verdict_global : entrée | {} analyse(s), {} non lu(s)", len(analyses), len(non_lus)
+    )
+    if not analyses:
+        logger.debug("verdict_global : sortie | aucune mesure")
+        return VerdictGlobal(0, 0, 1.96, None, "aucune mesure")
+    if non_lus:
+        logger.debug("verdict_global : sortie | jeu incomplet (non lus)")
+        return VerdictGlobal(
+            len(analyses), 0, 1.96, None, f"{len(non_lus)} test(s) sans lecture ElastiFlow"
+        )
+    non_calculables = [a for a in analyses if a.erreur_pct is None or a.borne_pct is None]
+    if non_calculables:
+        logger.debug("verdict_global : sortie | mesure(s) non calculable(s)")
+        return VerdictGlobal(
+            len(analyses), 0, 1.96, None, f"{len(non_calculables)} mesure(s) non calculable(s)"
+        )
+    z = _z_bonferroni(len(analyses))
+    hors_borne = [a for a in analyses if a.conforme is False]
+    verdict = not hors_borne
+    resultat = VerdictGlobal(len(analyses), len(hors_borne), z, verdict, None)
+    logger.debug("verdict_global : sortie | {}", resultat.verdict)
+    return resultat
 
 
 def _sampling_effectif(resultat: dict[str, str], lecture: dict[str, str]) -> int:
@@ -103,6 +186,11 @@ def _sampling_effectif(resultat: dict[str, str], lecture: dict[str, str]) -> int
 def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]:
     """Joint ``resultats.csv`` et ``lectures.csv`` et calcule chaque mesure.
 
+    La conformité suit la règle du verdict global (issue #9, décision du 28/10/2026) :
+    borne Bonferroni z(m)·100/√n commune à la famille des m mesures évaluées —
+    z(m) = Φ⁻¹(1 − 0,05/2m), soit 3,05 pour 22 mesures. La borne à 95 % par mesure
+    (196/√n) reste une information secondaire de diagnostic (``borne95_pct``).
+
     Returns:
         Les analyses (une par test et exportateur lu) et les identifiants des tests sans
         lecture ElastiFlow (fenêtre pas encore close ou rien d'indexé).
@@ -112,7 +200,7 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
         lignes_reference = {(t["id"], t["repetition"]): t for t in csv.DictReader(f)}
     with lectures.open(encoding="utf-8", newline="") as f:
         lignes_lues = list(csv.DictReader(f))
-    analyses: list[Analyse] = []
+    brutes: list[tuple[dict[str, str], dict[str, str], float, float | None]] = []
     vus: set[tuple[str, str]] = set()
     for lecture in lignes_lues:
         cle = (lecture["id"], lecture["repetition"])
@@ -126,12 +214,20 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
         sampling = _sampling_effectif(reference, lecture)
         octets_elastiflow = int(lecture["octets"] or 0)
         n_attendu = paquets_reference / sampling if sampling and paquets_reference else 0.0
-        borne = BORNE / n_attendu**0.5 if n_attendu else None
         erreur = (
             (octets_elastiflow - octets_reference) / octets_reference * 100.0
             if octets_reference
             else None
         )
+        brutes.append((reference, lecture, n_attendu, erreur))
+    # Borne Bonferroni commune à la famille des m mesures évaluées (issue #9).
+    z = _z_bonferroni(len(brutes))
+    analyses: list[Analyse] = []
+    for reference, lecture, n_attendu, erreur in brutes:
+        octets_reference = int(reference["octets"] or 0)
+        paquets_reference = int(reference["paquets"] or 0)
+        borne = z * 100.0 / n_attendu**0.5 if n_attendu else None
+        borne95 = BORNE / n_attendu**0.5 if n_attendu else None
         conforme: bool | None
         if erreur is None or borne is None:
             conforme = None
@@ -150,14 +246,15 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
                 fin=int(reference["fin"] or 0),
                 paquets_reference=paquets_reference,
                 octets_reference=octets_reference,
-                octets_elastiflow=octets_elastiflow,
+                octets_elastiflow=int(lecture["octets"] or 0),
                 paquets_elastiflow=int(lecture["paquets"] or 0),
                 enregistrements=int(lecture["enregistrements"] or 0),
-                sampling=sampling,
+                sampling=_sampling_effectif(reference, lecture),
                 sampling_lu=str(lecture.get("sampling") or ""),
                 n_attendu=n_attendu,
                 erreur_pct=erreur,
                 borne_pct=borne,
+                borne95_pct=borne95,
                 conforme=conforme,
             )
         )
@@ -220,7 +317,8 @@ def _fiche(a: Analyse) -> list[str]:
         f"{a.paquets_elastiflow}, {a.octets_elastiflow} |",
         f"| Échantillons attendus n | {a.n_attendu:.0f} |",
         f"| Erreur observée (%) | {_pct(a.erreur_pct)} |",
-        f"| Borne à 95 % (%) | {_pct(a.borne_pct)} |",
+        f"| Borne Bonferroni z·100/√n (%) | {_pct(a.borne_pct)} |",
+        f"| Borne à 95 % seule (diagnostic) | {_pct(a.borne95_pct)} |",
         f"| Conforme | {conforme} |",
         "",
     ]
@@ -233,7 +331,7 @@ def _synthese(analyses: Sequence[Analyse]) -> list[str]:
     logger.debug("_synthese : entrée | {} analyse(s)", len(analyses))
     lignes = [
         "| ID | Exportateur | Octets de référence | Octets ElastiFlow | Échantillons n | "
-        "Erreur observée | Borne à 95 % | Conforme |",
+        "Erreur observée | Borne Bonferroni | Conforme |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for a in sorted(analyses, key=lambda x: (x.id, x.repetition, x.exportateur)):
@@ -269,6 +367,36 @@ def _conclusion(analyses: Sequence[Analyse]) -> list[str]:
         "protocole impose une revalidation allégée ou complète."
     )
     logger.debug("_conclusion : sortie | {} ligne(s)", len(lignes))
+    return lignes
+
+
+def _verdict(analyses: Sequence[Analyse], non_lus: Sequence[str]) -> list[str]:
+    """Bloc du verdict global : toutes les mesures dans la borne Bonferroni (§10.3, #9)."""
+    logger.debug("_verdict : entrée | {} analyse(s)", len(analyses))
+    v = verdict_global(analyses, non_lus)
+    if v.verdict is None:
+        lignes = [
+            "**Verdict global** (protocole §10.3) : non calculable — "
+            f"{v.non_calculable} ; un jeu incomplet ne peut pas être validé.",
+            "",
+        ]
+        logger.debug("_verdict : sortie | {} ligne(s)", len(lignes))
+        return lignes
+    lignes = [
+        "**Verdict global** (protocole §10.3, issue #9) :",
+        "",
+        "| Mesures | Hors borne | z Bonferroni | Verdict |",
+        "| --- | --- | --- | --- |",
+        f"| {v.nb_mesures} | {v.nb_hors_borne} | {v.z_bonferroni:.2f} | "
+        f"{'Validé' if v.verdict else 'Refusé'} |",
+        "",
+        f"Toutes les mesures doivent rester dans la borne Bonferroni z·100/√n "
+        f"(z = {v.z_bonferroni:.2f} pour {v.nb_mesures} mesures) : "
+        "P(au moins un dépassement par hasard) ≤ 5 %. La borne à 95 % par mesure "
+        "reste le diagnostic des fiches ci-dessus.",
+        "",
+    ]
+    logger.debug("_verdict : sortie | {} ligne(s)", len(lignes))
     return lignes
 
 
@@ -313,6 +441,7 @@ def construire_document(analyses: Sequence[Analyse], non_lus: Sequence[str]) -> 
     lignes += ["**Synthèse des résultats**", ""]
     lignes += _conclusion(analyses)
     lignes.append("")
+    lignes += _verdict(analyses, non_lus)
     lignes.append("**Verdict** : à compléter et signer (VAL-ELASTIFLOW-001, section 10).")
     texte = "\n".join(lignes)
     logger.debug("construire_document : sortie | {} caractère(s)", len(texte))

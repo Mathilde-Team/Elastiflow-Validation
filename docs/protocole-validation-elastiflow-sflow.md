@@ -797,6 +797,35 @@ erreur (%)    = (octets_elastiflow - octets_référence) / octets_référence ×
 conforme      = |erreur| <= borne_95
 ```
 
+**Verdict global (issue #9, décision d'équipe du 28/10/2026 : option B).** Exiger
+que toutes les mesures restent dans leur borne à 95 % fait échouer un instrument
+juste par pur hasard : avec m mesures, P(au moins un dépassement) = 1 − 0,95^m,
+soit 68 % dès m = 22. La règle retenue est la **correction de Bonferroni** :
+la borne de conformité de chaque mesure et le verdict global utilisent
+z(m)·100/√n au lieu de 196/√n, avec
+
+```
+z(m) = Φ⁻¹(1 − 0,05/2m)     (1,96 pour m = 1 ; 3,05 pour m = 22)
+```
+
+- **toutes les mesures** doivent rester dans cette borne : par l'inégalité de
+  Boole, P(au moins un dépassement par hasard) ≤ m·(0,05/m) = 5 %, sans aucune
+  hypothèse d'indépendance entre mesures ;
+- la borne à 95 % seule (196/√n) reste une **information secondaire de
+  diagnostic** dans les fiches de test (§10.2) ;
+- un jeu incomplet ne peut pas être validé : un test sans lecture ElastiFlow ou
+  une mesure non calculable rend le verdict non calculable (un sous-ensemble
+  prévu et un jeu incomplet ne sont pas équivalents) ;
+- la famille est l'ensemble des m mesures évaluées, dans le périmètre de
+  validation concerné (§10.4 : un lien, un exportateur et une chaîne de
+  collecte donnés) ; le nombre m s'entend des mesures effectivement évaluées
+  (sous-ensemble minimal, répétitions) ;
+- critère d'acceptation : P(toutes les mesures dans la borne) ≥ 95 % — prouvé
+  exact par le calcul (test `test_verdict_jeu_complet_22_mesures_sans_biais`).
+
+Le verdict global est calculé par `efv rapport` (section 10 du document) ; la
+décision reste signée par un humain (VAL-ELASTIFLOW-001).
+
 ### 10.4 Périmètre de validité et revalidation
 
 Une validation porte sur **un lien, un exporteur et une chaîne de collecte donnés**. Elle ne vaut pas, telle quelle,

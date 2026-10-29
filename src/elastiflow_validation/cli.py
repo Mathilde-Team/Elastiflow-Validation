@@ -475,7 +475,9 @@ def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
         "rapport",
         help="comparaison ElastiFlow / référence et document VAL-ELASTIFLOW-001 (§10)",
         description=(
-            "Pour chaque test lu : erreur, borne à 95 % (196 ÷ √n), conformité, biais moyen sur "
+            "Pour chaque test lu : erreur, borne globale à 95 % (Bonferroni : z ÷ √n, "
+            "z ≈ 3,05 pour 22 "
+            "mesures), conformité, biais moyen sur "
             "les répétitions de A2/A3/A5. Écrit les sections 7, 8 et 10 de VAL-ELASTIFLOW-001 "
             "remplies ; le verdict signé reste à compléter."
         ),

@@ -763,7 +763,7 @@ par exportateur : celui du point de mesure.
 
 | Critère | Seuil |
 |---|---|
-| Erreur de volume (tests A2 à A6, B, C) | Dans la borne à 95 % de `196 ÷ √n`, avec n le nombre d'échantillons du test. |
+| Erreur de volume (tests A2 à A6, B, C) | **Toutes** les mesures dans la borne globale à 95 % `z ÷ √n` (Bonferroni, §10.3 : z ≈ 305 pour 22 mesures), avec n le nombre d'échantillons du test. |
 | Plancher (A2) | Erreur ≤ 5 % avec le sampling du tableau 4.2. |
 | Absence de biais | Sur 3 répétitions, la moyenne des erreurs est proche de 0 (un biais constant révèle un facteur d'échantillonnage ou une base de taille erronée). |
 | Détection au plancher (A1) | Fréquence de détection cohérente avec `1 − exp(−n attendu)`. |
@@ -785,17 +785,25 @@ par exportateur : celui du point de mesure.
 | ElastiFlow : somme paquets / octets | |
 | Échantillons attendus `n` | |
 | **Erreur observée** (ElastiFlow − référence) ÷ référence | |
-| Borne théorique à 95 % | |
+| Borne globale à 95 % (Bonferroni, §10.3) | |
 | Conforme (oui / non) | |
 
 ### 10.3 Calcul de l'erreur
 
 ```
 n_attendu     = paquets_réels / sampling_rate
-borne_95 (%)  = 196 / sqrt(n_attendu)
+m             = nombre de mesures jugées ensemble (erreur et n calculables)
+z             = 100 × Φ⁻¹(1 − 0,05 / (2m))          # Bonferroni : ≈ 305 pour m = 22, 196 pour m = 1
+borne (%)     = z / sqrt(n_attendu)
 erreur (%)    = (octets_elastiflow - octets_référence) / octets_référence × 100
-conforme      = |erreur| <= borne_95
+conforme      = |erreur| <= borne
+critère rempli = toutes les mesures conformes
 ```
+
+Pourquoi Bonferroni (#9) : avec une borne individuelle à 95 % (`196 / √n`) et 22 mesures, un ElastiFlow juste sort au
+moins une fois de la borne par hasard dans 1 − 0,95²² ≈ 68 % des cas. La correction de Bonferroni ramène ce risque
+global d'échec à tort à 5 % au plus. Le seuil z est recalculé automatiquement si le nombre de mesures change
+(sous-ensemble minimal, répétitions) : `efv rapport` l'indique dans la conclusion.
 
 ### 10.4 Périmètre de validité et revalidation
 

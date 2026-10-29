@@ -7,8 +7,9 @@ Pour chaque test de ``resultats.csv`` lu dans ``lectures.csv`` (jointure sur ``i
 
 - erreur (%) = (octets ElastiFlow − octets de référence) ÷ octets de référence × 100 ;
 - n attendu = paquets réels ÷ sampling-rate du test ;
-- borne à 95 % = 196 ÷ √n (protocole §10.3) ;
-- conforme : |erreur| ≤ borne.
+- borne globale à 95 % = z ÷ √n, avec z = 100·Φ⁻¹(1 − 0,05 ÷ 2m) pour les m mesures calculables
+  (Bonferroni, protocole §10.3, #9 : ≈ 305 ÷ √n pour 22 mesures) ;
+- conforme : |erreur| ≤ borne ; le verdict exige que toutes les mesures soient conformes.
 
 Le biais moyen couvre les répétitions de A2, A3 et A5 (VAL §8) ; la comparaison avant/après
 correction du sampling apparie chaque test ``X-4096`` à son homologue ``X``. Le document produit
@@ -21,16 +22,19 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 from loguru import logger
 
+from elastiflow_validation.calcul import z_bonferroni
+
 __all__ = [
     "Analyse",
     "analyser",
+    "bornes_bonferroni",
     "biais_moyen",
     "comparaison_sampling",
     "construire_calibration_yaml",
@@ -39,7 +43,6 @@ __all__ = [
     "rapport",
 ]
 
-BORNE = 196.0
 SERIES_BIAIS = ("A2", "A3", "A5")
 SUFFIXE_ANCIEN_SAMPLING = "-4096"
 # Clés de lecture (CHAMPS_DEFAUT) traduites vers les clés de ``elastiflow.FIELDS`` de qos-audit.
@@ -126,17 +129,11 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
         sampling = _sampling_effectif(reference, lecture)
         octets_elastiflow = int(lecture["octets"] or 0)
         n_attendu = paquets_reference / sampling if sampling and paquets_reference else 0.0
-        borne = BORNE / n_attendu**0.5 if n_attendu else None
         erreur = (
             (octets_elastiflow - octets_reference) / octets_reference * 100.0
             if octets_reference
             else None
         )
-        conforme: bool | None
-        if erreur is None or borne is None:
-            conforme = None
-        else:
-            conforme = abs(erreur) <= borne
         analyses.append(
             Analyse(
                 id=reference["id"],
@@ -157,13 +154,38 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
                 sampling_lu=str(lecture.get("sampling") or ""),
                 n_attendu=n_attendu,
                 erreur_pct=erreur,
-                borne_pct=borne,
-                conforme=conforme,
+                borne_pct=None,
+                conforme=None,
             )
         )
+    analyses = bornes_bonferroni(analyses)
     non_lus = [f"{i} ({r})" for (i, r) in lignes_reference if (i, r) not in vus]
     logger.debug("analyser : sortie | {} analyse(s), {} non lu(s)", len(analyses), len(non_lus))
     return analyses, non_lus
+
+
+def bornes_bonferroni(analyses: Sequence[Analyse]) -> list[Analyse]:
+    """Borne et conformité de chaque mesure, corrigées de Bonferroni pour l'ensemble (#9).
+
+    Les m mesures calculables (erreur et n connus) sont jugées ensemble : chacune reçoit la borne
+    ``z_bonferroni(m) ÷ √n``. Une mesure non calculable garde ``borne_pct`` et ``conforme`` à
+    ``None`` et n'entre pas dans m.
+    """
+    logger.debug("bornes_bonferroni : entrée | {} analyse(s)", len(analyses))
+    calculables = [a for a in analyses if a.erreur_pct is not None and a.n_attendu > 0]
+    if not calculables:
+        logger.debug("bornes_bonferroni : sortie | aucune mesure calculable")
+        return list(analyses)
+    z = z_bonferroni(len(calculables))
+    resultat: list[Analyse] = []
+    for a in analyses:
+        if a.erreur_pct is None or a.n_attendu <= 0:
+            resultat.append(a)
+            continue
+        borne = z / a.n_attendu**0.5
+        resultat.append(replace(a, borne_pct=borne, conforme=abs(a.erreur_pct) <= borne))
+    logger.debug("bornes_bonferroni : sortie | m={} z={:.1f}", len(calculables), z)
+    return resultat
 
 
 def biais_moyen(analyses: Sequence[Analyse]) -> float | None:
@@ -220,7 +242,7 @@ def _fiche(a: Analyse) -> list[str]:
         f"{a.paquets_elastiflow}, {a.octets_elastiflow} |",
         f"| Échantillons attendus n | {a.n_attendu:.0f} |",
         f"| Erreur observée (%) | {_pct(a.erreur_pct)} |",
-        f"| Borne à 95 % (%) | {_pct(a.borne_pct)} |",
+        f"| Borne globale à 95 % (%) | {_pct(a.borne_pct)} |",
         f"| Conforme | {conforme} |",
         "",
     ]
@@ -233,7 +255,7 @@ def _synthese(analyses: Sequence[Analyse]) -> list[str]:
     logger.debug("_synthese : entrée | {} analyse(s)", len(analyses))
     lignes = [
         "| ID | Exportateur | Octets de référence | Octets ElastiFlow | Échantillons n | "
-        "Erreur observée | Borne à 95 % | Conforme |",
+        "Erreur observée | Borne globale à 95 % | Conforme |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for a in sorted(analyses, key=lambda x: (x.id, x.repetition, x.exportateur)):
@@ -262,6 +284,21 @@ def _conclusion(analyses: Sequence[Analyse]) -> list[str]:
         passes = sum(1 for a in groupe if a.conforme)
         lignes.append(f"| {nom} | {passes} / {len(groupe)} | |")
     lignes.append("")
+    jugees = [a for a in analyses if a.conforme is not None]
+    if jugees:
+        conformes = sum(1 for a in jugees if a.conforme)
+        z = f"{z_bonferroni(len(jugees)) / 100:.2f}".replace(".", ",")
+        lignes.append(
+            f"**Critère global** (protocole §10.3, Bonferroni sur m = {len(jugees)} mesures, "
+            f"z = {z}) : "
+            f"{conformes} / {len(jugees)} mesures dans leur borne ; "
+            + (
+                "toutes conformes, critère rempli."
+                if conformes == len(jugees)
+                else "critère non rempli."
+            )
+        )
+        lignes.append("")
     lignes.append(
         "**Périmètre de validité** (protocole §10.4) : le verdict ne vaut que pour les "
         "exportateurs, interfaces, sampling-rates et versions ElastiFlow listés dans les "

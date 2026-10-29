@@ -69,7 +69,7 @@ Le sampling-rate se règle **par interface**. Le débit à retenir est le débit
 
 | Critère | Seuil |
 | --- | --- |
-| Erreur de volume (séries A, B, C) | Dans la borne à 95 % : 196 ÷ √n, avec n le nombre d'échantillons du test |
+| Erreur de volume (séries A, B, C) | Toutes les mesures dans la borne globale à 95 % : z ÷ √n (Bonferroni, z ≈ 305 pour 22 mesures), avec n le nombre d'échantillons du test |
 | Plancher (A2) | Erreur ≤ 5 % avec le sampling recommandé |
 | Absence de biais | Sur 3 répétitions, la moyenne des erreurs est proche de 0 |
 | Détection au plancher (A1) | Fréquence de détection cohérente avec 1 − exp(−n attendu) |
@@ -205,9 +205,9 @@ D2 et D3 sont ajoutés en second temps si les résultats de D1 le justifient.
 
 ## 8. Synthèse chiffrée des erreurs
 
-Octets de référence : compteurs nft du client, dans la base établie en P5. Erreur = (ElastiFlow − référence) ÷ référence. Borne à 95 % = 196 ÷ √n, avec n = paquets réels ÷ sampling-rate.
+Octets de référence : compteurs nft du client, dans la base établie en P5. Erreur = (ElastiFlow − référence) ÷ référence. Borne globale à 95 % = z ÷ √n, avec n = paquets réels ÷ sampling-rate et z = 100 × Φ⁻¹(1 − 0,05 ÷ 2m) pour m mesures (Bonferroni, protocole §10.3).
 
-| ID | Octets de référence | Octets ElastiFlow | Échantillons n | Erreur observée | Borne à 95 % | Conforme |
+| ID | Octets de référence | Octets ElastiFlow | Échantillons n | Erreur observée | Borne globale à 95 % | Conforme |
 | --- | --- | --- | --- | --- | --- | --- |
 | A1 |  |  |  |  |  | ☐ |
 | A2 (1) |  |  |  |  |  | ☐ |
@@ -312,7 +312,7 @@ rapportés comme « observés, non contractuels ».
 **Précision d'un échantillonnage 1:N** (95 % de confiance) :
 
 - n = paquets réels ÷ sampling-rate
-- borne (%) = 196 ÷ √n
+- borne (%) d'une mesure isolée = 196 ÷ √n ; borne globale pour m mesures = z ÷ √n, z = 100 × Φ⁻¹(1 − 0,05 ÷ 2m) (≈ 305 pour 22)
 - échantillons nécessaires pour 5 % : n ≈ 1 537 (20 à 30 % de marge pour des octets avec tailles variables)
 - probabilité de détecter un flux : 1 − exp(−n attendu)
 

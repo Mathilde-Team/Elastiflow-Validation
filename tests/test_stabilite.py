@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Constance du débit (#31) : série par minute, critère, fichiers, branchement dans efv lire."""
 
 from __future__ import annotations

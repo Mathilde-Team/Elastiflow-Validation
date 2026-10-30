@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Applique le socle qualité Mathilde-Team à un dépôt créé depuis modele-depot :
 #   - branche `dev` créée depuis `main` si absente ;
 #   - protections de `main` et `dev` appliquées depuis la règle versionnée

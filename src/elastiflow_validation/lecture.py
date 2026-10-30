@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Lecture dans ElastiFlow : une requête d'agrégation par test de ``resultats.csv`` (§9, issue #5).
 
 Pour chaque ligne : filtre sur la clé connue (IP source et destination, ports source, port de
@@ -34,6 +35,7 @@ from elastiflow_validation.injection import Banc
 __all__ = [
     "BORD_S",
     "CHAMPS_DEFAUT",
+    "CHAMPS_OPTIONNELS",
     "COLONNES_LECTURE",
     "DELAI_S",
     "INDEX_DEFAUT",
@@ -66,6 +68,16 @@ CHAMPS_DEFAUT = {
     "sampling": "flow.sampling.interval",
     "dscp": "flow.ip.dscp",
 }
+# Champs facultatifs (#30) : sous-totaux par interface et échantillonneur, ignorés s'ils manquent
+# au mapping. Un paquet prélevé à l'entrée d'un port et à la sortie d'un autre du même switch donne
+# deux enregistrements aux interfaces d'entrée et de sortie identiques (qos-audit#26) : seul
+# l'échantillonneur (sFlow source_id_index, nom ElastiFlow à relever en P4, sans défaut) les
+# distingue.
+CHAMPS_OPTIONNELS = {
+    "interface_entree": "flow.input.ifindex",
+    "interface_sortie": "flow.output.ifindex",
+    "echantillonneur": "",
+}
 COLONNES_LECTURE = (
     "id",
     "repetition",
@@ -81,6 +93,9 @@ COLONNES_LECTURE = (
     "dscp",
     "debut_fenetre",
     "fin_fenetre",
+    "interfaces",
+    "echantillonneurs",
+    "double_echantillonnage",
 )
 
 
@@ -174,6 +189,8 @@ class ClientHttp:
 def charger_champs(chemin: Path | None) -> dict[str, str]:
     """Noms de champs : défauts (``CHAMPS_DEFAUT``) surchargés par un YAML ``cle: nom``.
 
+    Les clés de ``CHAMPS_OPTIONNELS`` sont admises ; leurs défauts sont ajoutés par ``lire``.
+
     Raises:
         ValueError: Clé inconnue ou valeur non textuelle.
     """
@@ -186,11 +203,12 @@ def charger_champs(chemin: Path | None) -> dict[str, str]:
     if not isinstance(brut, dict):
         logger.debug("charger_champs : pas un dictionnaire")
         raise ValueError(f"{chemin} : dictionnaire « clé: nom de champ » attendu")
-    inconnues = sorted(set(brut) - set(CHAMPS_DEFAUT))
+    inconnues = sorted(set(brut) - set(CHAMPS_DEFAUT) - set(CHAMPS_OPTIONNELS))
     if inconnues or not all(isinstance(v, str) and v for v in brut.values()):
         logger.debug("charger_champs : invalide {}", inconnues)
         raise ValueError(
-            f"{chemin} : clés connues {', '.join(CHAMPS_DEFAUT)} ; noms de champs non vides "
+            f"{chemin} : clés connues {', '.join([*CHAMPS_DEFAUT, *CHAMPS_OPTIONNELS])} ; "
+            "noms de champs non vides "
             f"(inconnues : {', '.join(inconnues) or 'aucune'})"
         )
     champs.update(brut)
@@ -230,6 +248,17 @@ def _ports(texte: str) -> tuple[int, int]:
     plage = (int(bas), int(haut or bas))
     logger.debug("_ports : sortie {}", plage)
     return plage
+
+
+def _filtre_port_destination(champ: str, texte: str) -> dict:
+    """Filtre du port de destination : ``term`` (un port) ou ``range`` (iperf3, un serveur par
+    processus simultané : ``50001-50008``)."""
+    logger.debug("_filtre_port_destination : entrée {}", texte)
+    bas, haut = _ports(texte)
+    plage = {"range": {champ: {"gte": bas, "lte": haut}}}
+    filtre = {"term": {champ: bas}} if bas == haut else plage
+    logger.debug("_filtre_port_destination : sortie {}", filtre)
+    return filtre
 
 
 def fenetre_utile(debut: int, fin: int, bord_s: int = BORD_S) -> tuple[int, int]:
@@ -275,17 +304,42 @@ def requete_test(
     ]
     if ligne.get("ports"):  # vide : clé sans ports (ICMP, fragments sans en-tête L4, #33)
         bas, haut = _ports(ligne["ports"])
-        port_destination = int(ligne.get("port_destination") or banc.port_destination)
-        filtres += [
-            {"range": {champs["port_source"]: {"gte": bas, "lte": haut}}},
-            {"term": {champs["port_destination"]: port_destination}},
-        ]
+        filtres.append({"range": {champs["port_source"]: {"gte": bas, "lte": haut}}})
+        filtres.append(
+            _filtre_port_destination(  # plage possible : iperf3, un serveur par processus
+                champs["port_destination"],
+                ligne.get("port_destination") or str(banc.port_destination),
+            )
+        )
     if ligne.get("protocole"):
         filtres.append({"term": {champs["protocole"]: ligne["protocole"]}})
     sommes = {
         "octets": {"sum": {"field": champs["octets"]}},
         "paquets": {"sum": {"field": champs["paquets"]}},
     }
+    par_exportateur: dict = {
+        **sommes,
+        "sampling": {"terms": {"field": champs["sampling"], "size": 10}},
+        "dscp": {"terms": {"field": champs["dscp"], "size": 10}},
+        "minutes": {
+            "date_histogram": {"field": champs["horodatage"], "fixed_interval": "1m"},
+            "aggs": sommes,
+        },
+    }
+    if champs.get("interface_entree") and champs.get("interface_sortie"):  # #30, facultatif
+        par_exportateur["entrees"] = {
+            "terms": {"field": champs["interface_entree"], "size": 10, "missing": -1},
+            "aggs": {
+                "sorties": {
+                    "terms": {"field": champs["interface_sortie"], "size": 10, "missing": -1},
+                    "aggs": {"octets": sommes["octets"]},
+                }
+            },
+        }
+    if champs.get("echantillonneur"):
+        par_exportateur["echantillonneurs"] = {
+            "terms": {"field": champs["echantillonneur"], "size": 10}
+        }
     corps = {
         "size": 0,
         "track_total_hits": True,
@@ -293,15 +347,7 @@ def requete_test(
         "aggs": {
             "exportateurs": {
                 "terms": {"field": champs["exportateur"], "size": 50},
-                "aggs": {
-                    **sommes,
-                    "sampling": {"terms": {"field": champs["sampling"], "size": 10}},
-                    "dscp": {"terms": {"field": champs["dscp"], "size": 10}},
-                    "minutes": {
-                        "date_histogram": {"field": champs["horodatage"], "fixed_interval": "1m"},
-                        "aggs": sommes,
-                    },
-                },
+                "aggs": par_exportateur,
             }
         },
     }
@@ -323,6 +369,27 @@ def _entier(valeur: float) -> str:
     texte = str(round(valeur))
     logger.debug("_entier : sortie {}", texte)
     return texte
+
+
+def _interfaces(exp: dict) -> str:
+    """Octets par couple d'interfaces : ``"12>3=4500;12>-1=20"`` (-1 : champ absent)."""
+    logger.debug("_interfaces : entrée")
+    couples = [
+        f"{e['key']}>{s['key']}={round(s['octets']['value'])}"
+        for e in exp.get("entrees", {}).get("buckets", [])
+        for s in e["sorties"]["buckets"]
+    ]
+    texte = ";".join(couples)
+    logger.debug("_interfaces : sortie {}", texte)
+    return texte
+
+
+def _double(exp: dict) -> str:
+    """``oui`` si plusieurs échantillonneurs d'un exportateur ont vu le test (double comptage)."""
+    logger.debug("_double : entrée")
+    double = "oui" if len(exp.get("echantillonneurs", {}).get("buckets", [])) > 1 else ""
+    logger.debug("_double : sortie {}", double or "non")
+    return double
 
 
 def lire_test(
@@ -355,8 +422,14 @@ def lire_test(
                 _entier(octets_utiles), _entier(sum(b["paquets"]["value"] for b in minutes)),
                 str(duree_utile), debit, _valeurs(exp["sampling"]), _valeurs(exp["dscp"]),
                 str(debut - 60), str(fin + delai_s),
+                _interfaces(exp), _valeurs(exp.get("echantillonneurs", {})), _double(exp),
             ]
         )  # fmt: skip
+        if lignes[-1][-1]:
+            logger.warning(
+                "{}#{} : {} vu par plusieurs échantillonneurs ({}) : double comptage probable",
+                ligne["id"], ligne["repetition"], exp["key"], lignes[-1][-2],
+            )  # fmt: skip
     logger.debug("lire_test : sortie {} exportateur(s)", len(lignes))
     return lignes
 
@@ -385,8 +458,20 @@ def lire(
     """
     logger.debug("lire : entrée {} -> {}", resultats, sortie)
     champs = dict(champs or CHAMPS_DEFAUT)
+    for cle, nom in CHAMPS_OPTIONNELS.items():
+        if nom:
+            champs.setdefault(cle, nom)
     banc = banc or Banc()
+    optionnels = {k: v for k, v in champs.items() if k in CHAMPS_OPTIONNELS}
+    obligatoires = {k: v for k, v in champs.items() if k not in CHAMPS_OPTIONNELS}
     absents = champs_absents(client, index, champs)
+    for cle, nom in optionnels.items():
+        if nom in absents:  # facultatif (#30) : la lecture se fait sans ce sous-total
+            logger.warning(
+                "champ facultatif {} ({}) absent du mapping de {} : ignoré", cle, nom, index
+            )
+            del champs[cle]
+    absents = [nom for nom in absents if nom in obligatoires.values()]
     if absents:
         logger.debug("lire : champs absents {}", absents)
         raise ValueError(

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests du rapport de validation : comparaison, bornes à 95 % et document VAL-ELASTIFLOW-001."""
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import pytest
 import yaml
 
 from elastiflow_validation import cli, lecture, rapport
+from elastiflow_validation.calcul import z_bonferroni
 
 COLONNES_RESULTATS = (
     "id,repetition,serie,groupe,protocole,debit,taille,tos,ports,sampling,debut,fin,"
@@ -87,7 +89,8 @@ def _lecture(
 
 
 def test_analyser_calcul_erreur_borne_conformite(tmp_path):
-    # +0,5 % d'octets, n attendu = 8000 ÷ 8 = 1000 échantillons, borne = 196/√1000 ≈ 6,2 %
+    # +0,5 % d'octets, n attendu = 8000 ÷ 8 = 1000 échantillons ;
+    # une seule mesure : z = 196, borne ≈ 6,2 %
     resultats = _resultats(tmp_path, [_test_reference("A3")])
     lectures = _lectures(tmp_path, [_lecture("A3")])
     analyses, non_lus = rapport.analyser(resultats, lectures)
@@ -96,7 +99,8 @@ def test_analyser_calcul_erreur_borne_conformite(tmp_path):
     a = analyses[0]
     assert a.erreur_pct == pytest.approx(0.5)
     assert a.n_attendu == pytest.approx(1000.0)
-    assert a.borne_pct == pytest.approx(196.0 / math.sqrt(1000.0))
+    assert a.borne_pct == pytest.approx(z_bonferroni(1) / math.sqrt(1000.0))
+    assert a.borne_pct == pytest.approx(196.0 / math.sqrt(1000.0), rel=1e-4)
     assert a.conforme is True
     assert a.cle == "A3 (1)"
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests de la ligne de commande et de la configuration du journal."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Plan de tests YAML (#3) : chargement validé, ports, conversion en débits absolus, efv plan."""
 
 from __future__ import annotations
@@ -352,9 +353,10 @@ def test_serie_r_recette(defaut):
     assert t["R5"].attendu == (("exit_balance", "WARN"),) and t["R5"].lab
     assert t["R6"].attendu == (("sampling_adequacy", "CRIT"),) and t["R6"].sampling == 4096
     assert all(x.attendu == () for x in defaut if x.serie != "R")
-    # en fin de plan : les ports des autres séries ne bougent pas
-    avant = defaut[: [x.serie for x in defaut].index("R")]  # G5 (#33) vient après la série R
-    assert min(p for x in recette for p in x.ports) > max(p for x in avant for p in x.ports)
+    # en fin de plan (G5 et série S ajoutées après R) : les ports des autres séries ne bougent pas
+    assert min(p for x in recette for p in x.ports) > max(
+        p for x in defaut if x.serie not in {"R", "G", "S"} for p in x.ports
+    )
 
 
 def test_cli_plan_recette(capsys):
@@ -366,3 +368,25 @@ def test_cli_plan_recette(capsys):
     assert cli.main(["plan", "--lien", "10M", "--profil", "recette"]) == 0
     sortie = capsys.readouterr().out
     assert "Recette qos-audit : comparer ses verdicts" in sortie and "Validé" not in sortie
+
+
+def test_serie_s_sondes(defaut):
+    """#17 : sondes de production, légères, dans le profil, six classes en simultané."""
+    sondes = plan.plan_par_defaut("sonde")
+    assert [x.id for x in sondes] == ["S-EF", "S-AF41", "S-D1", "S-D2", "S-D3", "S-BF"]
+    assert {x.groupe for x in sondes} == {"S"} and not any(x.lab for x in sondes)
+    assert {x.dscp for x in sondes} == {46, 34, 26, 18, 10, 0}
+    assert all(x.duree_s == 30 and x.taille == 200 and x.protocole == "udp" for x in sondes)
+    # 64 kbit/s par classe : 384 kbit/s pour la passe, moins de 4 % d'un lien de 10 Mbit/s
+    execs = plan.executions(sondes, 10e6)
+    assert sum(e.debit_bps for e in execs) == pytest.approx(384e3)
+    # en fin de plan : les ports des autres séries (R comprise) ne bougent pas
+    autres = max(p for x in defaut if x.serie != "S" for p in x.ports)
+    assert min(p for x in sondes for p in x.ports) > autres
+
+
+def test_cli_plan_sonde(capsys):
+    assert cli.main(["plan", "--lien", "10M", "--profil", "sonde"]) == 0
+    sortie = capsys.readouterr().out
+    assert "Sondes de production : une passe toutes les 15 min" in sortie and "Validé" not in sortie
+    assert sortie.count("| S-") == 6

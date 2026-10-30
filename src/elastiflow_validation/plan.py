@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Plan de tests (protocole §7.6 à §8.3) : chargement validé et conversion en débits absolus.
 
 Le plan est un fichier YAML (``plans/protocole.yaml`` par défaut) décrivant chaque test : série,

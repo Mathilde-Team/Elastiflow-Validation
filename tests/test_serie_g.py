@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Série G outillée (#33) : G2 ICMP (ping), G5 fragmentation, clé de lecture sans ports."""
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ def test_plan_g2_icmp_et_g5_cle_ip():
     assert (g2.protocole, g2.ports, g2.cle, g2.taille, g2.sampling) == ("icmp", (), "ip", 1028, 8)
     assert g2.debit == plan.Debit("absolu", 1028 * 8 / plan.INTERVALLE_PING_S) and g2.manuel is None
     assert (g5.protocole, g5.taille, g5.cle, len(g5.ports)) == ("udp", 3028, "ip", 1)
-    assert max(p for t in tests.values() for p in t.ports) == g5.ports[0]  # fin de fichier
+    # fin de fichier, avant la série S
+    assert max(p for t in tests.values() if t.serie != "S" for p in t.ports) == g5.ports[0]
     assert {t.id for t in tests.values() if t.serie == "G" and t.manuel} == {"G1", "G3", "G4", "G6"}
     (e,) = plan.executions([g2], 10e6)
     assert e.charge_udp == 1000 and e.iperf_b == "41.12k"

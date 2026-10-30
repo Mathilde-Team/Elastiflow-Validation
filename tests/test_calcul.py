@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Formules du protocole (#2) : les tableaux 3.2, 4.2, 7.3 et 12.1 servent de référence."""
 
 from __future__ import annotations

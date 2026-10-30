@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Ligne de commande ``efv``.
 
 Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3), ``injecter`` (#4), ``lire`` (#5),
@@ -322,6 +323,11 @@ def commande_plan(arguments: argparse.Namespace) -> int:
                 "Recette qos-audit : comparer ses verdicts à la colonne « attendu » "
                 "(comparaison automatique : #6, qos-audit#36)"
             )
+        elif arguments.profil == "sonde":
+            print(
+                "Sondes de production : une passe toutes les 15 min, résultats au format "
+                "sondes.csv (protocole 8.8, qos-audit#29)"
+            )
         elif arguments.profil:
             print(
                 f"Profil {arguments.profil} : un verdict « Validé » sur ce profil "
@@ -365,6 +371,12 @@ def _ajouter_injecter(sous: argparse._SubParsersAction) -> None:
         help=f"port du serveur iperf (défaut {banc.port_destination})",
     )
     p.add_argument(
+        "--outil",
+        choices=injection.OUTILS,
+        default=banc.outil,
+        help="générateur : iperf2 (défaut) ou iperf3 (--cport, un serveur par processus, 7.12)",
+    )
+    p.add_argument(
         "--sortie",
         type=Path,
         default=Path("resultats.csv"),
@@ -404,7 +416,9 @@ def _selectionner(execs: list[plan.Execution], selecteurs: list[str]) -> list[pl
 def commande_injecter(arguments: argparse.Namespace) -> int:
     """Injecte le plan (ou sa sélection) et complète ``resultats.csv``."""
     logger.debug("commande_injecter : {}", arguments)
-    banc = injection.Banc(arguments.serveur, arguments.client, arguments.port_destination)
+    banc = injection.Banc(
+        arguments.serveur, arguments.client, arguments.port_destination, arguments.outil
+    )
     systeme = injection.SystemeReel()
     try:
         _, execs = _charger(arguments)
@@ -465,7 +479,9 @@ def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
         "rapport",
         help="comparaison ElastiFlow / référence et document VAL-ELASTIFLOW-001 (§10)",
         description=(
-            "Pour chaque test lu : erreur, borne à 95 % (196 ÷ √n), conformité, biais moyen sur "
+            "Pour chaque test lu : erreur, borne globale à 95 % (Bonferroni : z ÷ √n, "
+            "z ≈ 3,05 pour 22 "
+            "mesures), conformité, biais moyen sur "
             "les répétitions de A2/A3/A5. Écrit les sections 7, 8 et 10 de VAL-ELASTIFLOW-001 "
             "remplies ; le verdict signé reste à compléter."
         ),

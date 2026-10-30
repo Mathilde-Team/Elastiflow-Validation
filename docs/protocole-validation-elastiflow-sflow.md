@@ -706,7 +706,9 @@ Un point de vigilance de fond : ElastiFlow **reconstruit des flux à partir d'é
 | Octets / paquets | `network.bytes`, `network.packets` | |
 | Date | `@timestamp` | début et fin du flux dans les champs `event.*` ou `flow.*` |
 | Exportateur (le switch) | | champ `flow.export.*` |
-| Sampling-rate appliqué | | champ `flow.sampling_interval` ou équivalent |
+| Sampling-rate appliqué | | `flow.sampling_interval` — nom établi (documentation ElastiFlow,
+  github.com/robcowart/elastiflow#116 ; aligné dans qos-audit, issue #16 et PR #84) ; à confirmer
+  en P4 sur le mapping réel de l'instance, avec sa version d'ElastiFlow |
 | Interfaces d'entrée / sortie | | champs `flow.input.*` et `flow.output.*` |
 | DSCP / TOS | | champs `flow.ip.dscp*` ou équivalent |
 | Flags TCP, VLAN | | champs `flow.tcp.*`, `flow.vlan.*` ou équivalent |

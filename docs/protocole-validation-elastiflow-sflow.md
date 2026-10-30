@@ -725,7 +725,7 @@ Les noms ECS sont standards. **Les noms spécifiques ElastiFlow dépendent de la
 3. **Contrôle des métadonnées.** Vérifier sur un enregistrement : exportateur, interface d'entrée, **sampling-rate attendu** (celui de l'interface), DSCP émis. Un sampling-rate incorrect fausse tous les volumes d'un facteur constant.
 4. **Somme.** Somme de `network.bytes` et de `network.packets` sur la fenêtre utile (on exclut la première et la dernière minute, montée en charge et fin de flux).
 5. **Débit.** `octets × 8 ÷ durée` (en excluant les minutes de bord).
-6. **Constance du débit.** Histogramme par minute de la somme des octets : le débit doit être stable. Attention : le nombre d'échantillons **par minute** est bien plus faible que sur 30 min, donc la dispersion par minute est naturellement plus grande (de l'ordre de `196 ÷ √n_minute`). Juger la constance sur des fenêtres de 5 min plutôt que d'une minute.
+6. **Constance du débit.** Histogramme par minute de la somme des octets : le débit doit être stable. Attention : le nombre d'échantillons **par minute** est bien plus faible que sur 30 min, donc la dispersion par minute est naturellement plus grande (de l'ordre de `196 ÷ √n_minute`). Le critère de 10.1 en tient compte : chaque minute est jugée contre sa propre borne `196 ÷ √n_minute`, avec une tolérance au hasard calculée sur le nombre de minutes (`efv lire --series --stabilite`, #31).
 7. **Comparaison.** Estimation ElastiFlow contre référence (octets nft, avec la correction de base établie en phase 0), puis calcul de l'erreur.
 8. **Cas multi-points.** Reprendre 1 à 7 pour chaque exportateur (A et B), puis comparer A et B.
 
@@ -780,6 +780,7 @@ par exportateur : celui du point de mesure.
 |---|---|
 | Erreur de volume (tests A2 à A6, B, C) | **Toutes** les mesures dans la borne globale à 95 % `z ÷ √n` (Bonferroni, §10.3 : z ≈ 305 pour 22 mesures), avec n le nombre d'échantillons du test. |
 | Plancher (A2) | Erreur ≤ 5 % avec le sampling du tableau 4.2. |
+| Débit constant (A, C2) | Sur la fenêtre utile (hors minutes de bord), chaque minute a au moins un échantillon ; son écart à la moyenne des minutes reste sous `f × 196 ÷ √n_minute` avec `f = max(1,5 ; Φ⁻¹(1 − 0,01 ÷ 2m) ÷ 1,96)` (1,82 pour m = 28 minutes) ; au plus k minutes dépassent `196 ÷ √n_minute`, k plus petit entier tel que P(X > k) ≤ 4 % pour X binomiale (m ; 0,05) (k = 4 pour 28 minutes). Risque total de refuser à tort une série stable : ≤ 5 % (1,2 à 2,6 % mesurés en simulation). |
 | Absence de biais | Sur 3 répétitions, la moyenne des erreurs est proche de 0 (un biais constant révèle un facteur d'échantillonnage ou une base de taille erronée). |
 | Détection au plancher (A1) | Fréquence de détection cohérente avec `1 − exp(−n attendu)`. |
 | Marquage (Q1) | 100 % des DSCP émis retrouvés au point A ; au point B, écarts expliqués par la politique de l'opérateur. |

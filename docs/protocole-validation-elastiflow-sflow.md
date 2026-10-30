@@ -458,6 +458,21 @@ Retirer ensuite la règle : `tc qdisc del dev eth0 root`. `netem` s'applique à 
 | Fragmentation | UDP avec `-l 3000` | Les fragments suivants n'ont pas d'en-tête L4 : **pas de ports** dans ElastiFlow. |
 | Compteurs d'interface | `display counters rate inbound interface ...` | Débit calculé par ElastiFlow depuis les compteurs vs débit du switch (visible grâce au `counter interval 30`). |
 
+**Outillage (#33).** G2 et G5 sont dans le plan et passent par `efv injecter` et `efv lire` ; les autres restent
+des gestes de l'opérateur, notés dans la fiche VAL :
+
+| Test | Outillage | Vérité terrain et lecture |
+|---|---|---|
+| G1 VLAN | manuel : changer la topologie du banc (deux VLAN, routage) n'est pas un geste scriptable depuis le client | mêmes commandes iperf, VLAN et interfaces lus dans Kibana |
+| G2 ICMP | `protocole: icmp` : `ping -c N -i 0.2 -s TAILLE−28 -t 64 -Q TOS -I CLIENT SERVEUR`, 300 s à 1:8 ; ne consomme pas de port source | règle nft `icmp type echo-request counter` ; lecture par IP et protocole (colonnes `ports` et `port_destination` vides) |
+| G3 flags TCP | manuel : hping3 ou nping ne sont pas sur le banc de référence, et les flags ne sont pas encore lus (champ à relever en P1) | nombre de connexions noté à la main |
+| G4 IPv6 | manuel : le banc n'a pas d'adressage IPv6 de référence ; rejouer un test A avec `--serveur`/`--client` IPv6 quand il existe | idem série A |
+| G5 fragmentation | test UDP de 3028 o (`-l 3000`), `cle: ip`, 300 s à 1:8, en fin de plan pour ne pas décaler les ports | nft compte le datagramme avant fragmentation (3028 o) ; le lien porte 2 fragments (1500 + 1548 = 3048 o) dont le second sans ports : lecture par IP et protocole, attendu paquets ≈ 2 × nft, octets ≈ nft + 20 o par datagramme |
+| G6 compteurs | manuel : relevé `display counters rate` sur le switch, comparé à l'index des counter samples | saisie à la main dans la fiche |
+
+Une lecture sans ports compte tout le trafic du protocole entre le client et le serveur pendant la fenêtre : ne
+rien lancer d'autre entre les deux pendant G2 et G5 (la pause de 5 min entre tests y suffit).
+
 ### 7.12 Variante iperf3
 
 > À utiliser seulement si iperf2 n'est pas disponible (Rocky 9 : iperf3 dans les dépôts de base, iperf2

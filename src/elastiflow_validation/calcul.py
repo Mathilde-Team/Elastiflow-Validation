@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Formules du protocole de validation (§3, §4, §7.3, §8.1, §12.1).
 
 - précision d'un échantillonnage sFlow : borne à 95 % ``196/√n``, n cible ``(196/e)²`` (§3.1) ;
@@ -16,6 +17,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from statistics import NormalDist
 
 from loguru import logger
 
@@ -38,6 +40,7 @@ __all__ = [
     "taille_ip_de_charge",
     "tos",
     "trame_ethernet",
+    "z_bonferroni",
 ]
 
 Z_95 = 196  # 1,96 × 100 : la borne s'exprime directement en pour cent
@@ -89,6 +92,25 @@ def n_cible(erreur_pct: float = 5.0) -> int:
     n = math.ceil((Z_95 / erreur_pct) ** 2)
     logger.debug("n_cible : {}", n)
     return n
+
+
+def z_bonferroni(mesures: int, alpha: float = 0.05) -> float:
+    """Quantile de Bonferroni, en pour cent, pour ``mesures`` tests jugés ensemble (#9).
+
+    Le verdict global exige que **toutes** les mesures restent dans leur borne : pour garder un
+    risque global d'échec à tort de ``alpha``, chaque borne vaut ``z·100/√n`` avec
+    ``z = Φ⁻¹(1 − alpha / (2·mesures))`` (≈ 305 pour 22 mesures, 196 pour une seule).
+
+    Raises:
+        ValueError: ``mesures`` < 1 ou ``alpha`` hors de ]0, 1[.
+    """
+    logger.debug("z_bonferroni : entrée | mesures={} alpha={}", mesures, alpha)
+    if mesures < 1 or not 0 < alpha < 1:
+        logger.debug("z_bonferroni : sortie | paramètres invalides")
+        raise ValueError(f"mesures >= 1 et 0 < alpha < 1 attendus : {mesures}, {alpha}")
+    z = 100 * NormalDist().inv_cdf(1 - alpha / (2 * mesures))
+    logger.debug("z_bonferroni : sortie | {}", z)
+    return z
 
 
 def erreur_95(n: float) -> float:

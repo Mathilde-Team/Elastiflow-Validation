@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Ligne de commande ``efv``.
 
-Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3), ``injecter`` (#4), ``lire`` (#5).
-La suivante (rapport) est ajoutée module par module ; voir les issues du dépôt.
+Sous-commandes disponibles : ``sampling`` (#2), ``plan`` (#3), ``injecter`` (#4), ``lire`` (#5),
+``rapport`` (#6).
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from elastiflow_validation import __version__, calcul, injection, lecture, plan
+from elastiflow_validation import __version__, calcul, injection, lecture, plan, rapport
 from elastiflow_validation.journal import configurer
 
 
@@ -36,6 +37,7 @@ def construire_parseur() -> argparse.ArgumentParser:
     _ajouter_plan(sous)
     _ajouter_injecter(sous)
     _ajouter_lire(sous)
+    _ajouter_rapport(sous)
     logger.debug("parseur construit")
     return parseur
 
@@ -269,7 +271,11 @@ def _ligne_plan(e: plan.Execution) -> list[str]:
         if t.duree_s is not None
         else f"-n {plan.format_debit(t.volume_octets or 0)}"
     )
-    ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    ports = ""  # ICMP (G2) : pas de port
+    if t.ports:
+        ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    if t.cle == "ip":
+        ports = f"{ports} (lu sans ports)".strip()
     port = "" if t.port_destination is None else f"port destination {t.port_destination}"
     notes = [x for x in ("lab" if t.lab else "", port, t.prealable or "") if x]
     valeurs = [
@@ -317,6 +323,11 @@ def commande_plan(arguments: argparse.Namespace) -> int:
                 "Recette qos-audit : comparer ses verdicts à la colonne « attendu » "
                 "(comparaison automatique : #6, qos-audit#36)"
             )
+        elif arguments.profil == "sonde":
+            print(
+                "Sondes de production : une passe toutes les 15 min, résultats au format "
+                "sondes.csv (protocole 8.8, qos-audit#29)"
+            )
         elif arguments.profil:
             print(
                 f"Profil {arguments.profil} : un verdict « Validé » sur ce profil "
@@ -360,6 +371,12 @@ def _ajouter_injecter(sous: argparse._SubParsersAction) -> None:
         help=f"port du serveur iperf (défaut {banc.port_destination})",
     )
     p.add_argument(
+        "--outil",
+        choices=injection.OUTILS,
+        default=banc.outil,
+        help="générateur : iperf2 (défaut) ou iperf3 (--cport, un serveur par processus, 7.12)",
+    )
+    p.add_argument(
         "--sortie",
         type=Path,
         default=Path("resultats.csv"),
@@ -399,7 +416,9 @@ def _selectionner(execs: list[plan.Execution], selecteurs: list[str]) -> list[pl
 def commande_injecter(arguments: argparse.Namespace) -> int:
     """Injecte le plan (ou sa sélection) et complète ``resultats.csv``."""
     logger.debug("commande_injecter : {}", arguments)
-    banc = injection.Banc(arguments.serveur, arguments.client, arguments.port_destination)
+    banc = injection.Banc(
+        arguments.serveur, arguments.client, arguments.port_destination, arguments.outil
+    )
     systeme = injection.SystemeReel()
     try:
         _, execs = _charger(arguments)
@@ -424,6 +443,73 @@ def commande_injecter(arguments: argparse.Namespace) -> int:
     print(f"{n} lancement(s) {'simulé(s)' if arguments.dry_run else 'terminé(s)'}")
     logger.debug("commande_injecter : {} lancement(s)", n)
     return 0
+
+
+def commande_rapport(arguments: argparse.Namespace) -> int:
+    """Compare les lectures ElastiFlow à la référence et écrit le document de validation."""
+    logger.debug(
+        "commande_rapport : entrée {} + {} -> {}",
+        arguments.resultats,
+        arguments.lectures,
+        arguments.sortie,
+    )
+    try:
+        n = rapport.rapport(arguments.resultats, arguments.lectures, arguments.sortie)
+        if arguments.calibration:
+            champs = lecture.charger_champs(arguments.champs)
+            rapport.ecrire_calibration(
+                arguments.resultats,
+                arguments.lectures,
+                arguments.calibration,
+                champs,
+                arguments.ingest_lag_minutes,
+            )
+    except (OSError, ValueError, KeyError) as exc:
+        logger.error("rapport : {}", exc)
+        return 2
+    print(f"{n} analyse(s) -> {arguments.sortie}")
+    logger.debug("commande_rapport : sortie {} analyse(s)", n)
+    return 0
+
+
+def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
+    """Sous-commande ``efv rapport`` (§10 du protocole, issue #6)."""
+    logger.debug("_ajouter_rapport : entrée")
+    p = sous.add_parser(
+        "rapport",
+        help="comparaison ElastiFlow / référence et document VAL-ELASTIFLOW-001 (§10)",
+        description=(
+            "Pour chaque test lu : erreur, borne globale à 95 % (Bonferroni : z ÷ √n, "
+            "z ≈ 3,05 pour 22 "
+            "mesures), conformité, biais moyen sur "
+            "les répétitions de A2/A3/A5. Écrit les sections 7, 8 et 10 de VAL-ELASTIFLOW-001 "
+            "remplies ; le verdict signé reste à compléter."
+        ),
+    )
+    p.add_argument(
+        "--resultats", type=Path, default=Path("resultats.csv"), help="sortie d'injecter"
+    )
+    p.add_argument("--lectures", type=Path, default=Path("lectures.csv"), help="sortie de lire")
+    p.add_argument(
+        "--sortie", type=Path, default=Path("rapport-validation.md"), help="fichier écrit"
+    )
+    p.add_argument(
+        "--calibration",
+        type=Path,
+        default=None,
+        help="écrit aussi calibrations/<site>.yaml au format qos-audit (issue #15)",
+    )
+    p.add_argument(
+        "--champs", type=Path, help="YAML « clé: nom de champ » (P4, pour la calibration)"
+    )
+    p.add_argument(
+        "--ingest-lag-minutes",
+        type=int,
+        default=10,
+        help="délai d'agrégation P7 inscrit dans la calibration (défaut : 10)",
+    )
+    p.set_defaults(action=commande_rapport)
+    logger.debug("_ajouter_rapport : sortie")
 
 
 def _ajouter_lire(sous: argparse._SubParsersAction) -> None:

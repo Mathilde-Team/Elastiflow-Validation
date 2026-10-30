@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Plan de tests (protocole §7.6 à §8.3) : chargement validé et conversion en débits absolus.
 
 Le plan est un fichier YAML (``plans/protocole.yaml`` par défaut) décrivant chaque test : série,
@@ -37,11 +38,13 @@ __all__ = [
 
 PORT_BASE = 40000
 PAUSE_S = 300  # pause entre deux tests (#4)
-PROTOCOLES = {"udp", "tcp"}
+PROTOCOLES = {"udp", "tcp", "icmp"}
+INTERVALLE_PING_S = 0.2  # cadence ICMP fixe (ping -i 0.2, protocole 7.11) : 5 paquets/s
+CLES = ("ports", "ip")  # clé de lecture : IP + ports (défaut) ou IP + protocole seul (G2, G5)
 _CHAMPS = {
     "id", "serie", "groupe", "protocole", "debit", "taille", "dscp", "tos", "duree", "volume",
     "repetitions", "processus", "sampling", "prealable", "lab", "objectif", "manuel", "attendu",
-    "port_destination",
+    "port_destination", "cle",
 }  # fmt: skip
 # Contrôles de qos-audit (docs/CONTROLES.md) et gravités : verdicts attendus de la recette (#16).
 CONTROLES_QOS_AUDIT = {
@@ -85,6 +88,7 @@ class Test:
     manuel: str | None = None
     attendu: tuple[tuple[str, str], ...] = ()  # verdicts qos-audit attendus (contrôle, gravité)
     port_destination: int | None = None  # défaut : port du serveur iperf du banc
+    cle: str = "ports"  # « ip » : lecture sans ports (ICMP, fragments, #33)
 
     @property
     def dscp(self) -> int | None:
@@ -234,7 +238,11 @@ def _test(brut: object, n: int) -> Test:
     protocole = brut.get("protocole")
     if protocole not in PROTOCOLES:
         logger.debug("_test : protocole invalide")
-        raise ValueError(f"{ident} : protocole {protocole!r} (udp ou tcp attendu)")
+        raise ValueError(f"{ident} : protocole {protocole!r} (udp, tcp ou icmp attendu)")
+    if protocole == "icmp":
+        test = _test_icmp(brut, ident, serie)
+        logger.debug("_test : {} icmp", ident)
+        return test
     if "debit" not in brut:
         logger.debug("_test : sans débit")
         raise ValueError(f"{ident} : débit manquant")
@@ -257,14 +265,6 @@ def _test(brut: object, n: int) -> Test:
         logger.debug("_test : durée et volume")
         raise ValueError(f"{ident} : une durée ou un volume (exclusifs) attendu")
     processus = _entier(brut, "processus", ident) or 1
-    sampling = brut.get("sampling", "nominal")
-    if sampling != "nominal" and (
-        isinstance(sampling, bool) or not isinstance(sampling, int) or sampling < 1
-    ):
-        logger.debug("_test : sampling invalide")
-        raise ValueError(
-            f"{ident} : sampling « nominal » ou entier ≥ 1 attendu (lu : {sampling!r})"
-        )
     test = Test(
         id=ident,
         serie=serie,
@@ -276,7 +276,7 @@ def _test(brut: object, n: int) -> Test:
         volume_octets=None if volume is None else int(volume.valeur),
         repetitions=_entier(brut, "repetitions", ident) or 1,
         processus=processus,
-        sampling=None if sampling == "nominal" else sampling,
+        sampling=_sampling(brut, ident),
         groupe=None if brut.get("groupe") is None else str(brut["groupe"]),
         ports=tuple(PORT_BASE + n + i for i in range(processus)),
         prealable=brut.get("prealable"),
@@ -284,8 +284,71 @@ def _test(brut: object, n: int) -> Test:
         objectif=str(brut.get("objectif", "")),
         attendu=_attendu(brut, ident),
         port_destination=_port(brut, ident),
+        cle=_cle(brut, ident),
     )
     logger.debug("_test : {} ports {}", ident, test.ports)
+    return test
+
+
+def _sampling(brut: dict, ident: str) -> int | None:
+    """Sampling pendant le test : ``nominal`` (``None``, tableau 4.2) ou N (1:N)."""
+    logger.debug("_sampling : {}", ident)
+    sampling = brut.get("sampling", "nominal")
+    if sampling != "nominal" and (
+        isinstance(sampling, bool) or not isinstance(sampling, int) or sampling < 1
+    ):
+        logger.debug("_sampling : invalide")
+        raise ValueError(
+            f"{ident} : sampling « nominal » ou entier ≥ 1 attendu (lu : {sampling!r})"
+        )
+    resultat = None if sampling == "nominal" else sampling
+    logger.debug("_sampling : {}", resultat)
+    return resultat
+
+
+def _cle(brut: dict, ident: str) -> str:
+    """Clé de lecture : ``ports`` (défaut) ou ``ip`` (fragments sans en-tête L4, #33)."""
+    logger.debug("_cle : {}", ident)
+    cle = brut.get("cle", "ports")
+    if cle not in CLES:
+        logger.debug("_cle : invalide")
+        raise ValueError(f"{ident} : cle {cle!r} ({' ou '.join(CLES)} attendu)")
+    logger.debug("_cle : {}", cle)
+    return cle
+
+
+def _test_icmp(brut: dict, ident: str, serie: str) -> Test:
+    """Test ICMP (G2) : ``ping`` à cadence fixe, sans port ni débit, lu par IP et protocole."""
+    logger.debug("_test_icmp : {}", ident)
+    interdits = sorted({"debit", "volume", "processus", "port_destination", "cle"} & set(brut))
+    if interdits:
+        logger.debug("_test_icmp : champs interdits")
+        raise ValueError(
+            f"{ident} : {', '.join(interdits)} sans objet en ICMP (ping à cadence fixe, sans port)"
+        )
+    taille = _entier(brut, "taille", ident, minimum=calcul.ENTETES_IP_UDP + 1)
+    duree = _entier(brut, "duree", ident)
+    if taille is None or duree is None:
+        logger.debug("_test_icmp : taille ou durée manquante")
+        raise ValueError(f"{ident} : taille IP et durée obligatoires en ICMP")
+    test = Test(
+        id=ident,
+        serie=serie,
+        protocole="icmp",
+        debit=Debit("absolu", taille * 8 / INTERVALLE_PING_S),
+        taille=taille,
+        tos=_tos(brut, ident),
+        duree_s=duree,
+        repetitions=_entier(brut, "repetitions", ident) or 1,
+        sampling=_sampling(brut, ident),
+        groupe=None if brut.get("groupe") is None else str(brut["groupe"]),
+        prealable=brut.get("prealable"),
+        lab=bool(brut.get("lab", False)),
+        objectif=str(brut.get("objectif", "")),
+        attendu=_attendu(brut, ident),
+        cle="ip",
+    )
+    logger.debug("_test_icmp : {} octets toutes les {} s", taille, INTERVALLE_PING_S)
     return test
 
 
@@ -429,7 +492,9 @@ def executions(
             test=t,
             repetition=r,
             debit_bps=_debit_bps(t, lien_bps, par_dscp),
-            charge_udp=calcul.charge_udp(t.taille) if t.protocole == "udp" and t.taille else None,
+            charge_udp=calcul.charge_udp(t.taille)
+            if t.protocole in {"udp", "icmp"} and t.taille
+            else None,
         )
         for t in tests
         if t.manuel is None

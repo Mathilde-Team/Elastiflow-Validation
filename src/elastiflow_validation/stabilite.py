@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Constance du débit d'un test : série par minute utile et critère (§9.3, §10.1, #31).
 
 Pour un test à débit constant (séries A et C2), la somme des octets de chaque minute utile est

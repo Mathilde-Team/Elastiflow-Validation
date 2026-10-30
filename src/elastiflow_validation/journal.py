@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Configuration de loguru pour la ligne de commande (SOCLE §8).
 
 Niveau INFO par défaut sur la sortie d'erreur ; DEBUG avec ``--debug`` ou la

@@ -1,4 +1,5 @@
-"""Injection (protocole §7.7) : pilotage d'iperf2 et relevé de la vérité terrain nft.
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Injection (protocole §7.7) : pilotage d'iperf2 ou d'iperf3, relevé de la vérité terrain nft.
 
 Remplace ``run_test.sh``. Pour chaque lancement du plan (un test, ou les tests d'un groupe partis
 ensemble, une répétition à la fois) :
@@ -12,6 +13,10 @@ ensemble, une répétition à la fois) :
 Les changements de sampling sur l'exporteur, les commandes préalables (``tc … netem``) et les tests
 réservés au laboratoire restent des gestes de l'opérateur : l'outil les annonce et attend sa
 confirmation. Le mode simulation (``dry_run``) affiche les commandes sans rien exécuter.
+
+Variante iperf3 (``Banc.outil``, protocole 7.12) : port source par ``--cport``, un serveur ne sert
+qu'un test à la fois, donc un port de destination par processus simultané (``port_destination``,
+``+1``, ``+2``…), cadence UDP fine (``--pacing-timer 100``) et rapport JSON du serveur.
 """
 
 from __future__ import annotations
@@ -36,7 +41,10 @@ __all__ = [
     "Lancement",
     "Systeme",
     "SystemeReel",
+    "OUTILS",
     "commande_iperf",
+    "ports_destination",
+    "serveurs_iperf3",
     "injecter",
     "lancements",
     "lire_compteurs",
@@ -66,13 +74,18 @@ COLONNES = (
 )
 
 
+OUTILS = ("iperf2", "iperf3")
+PACING_IPERF3_US = 100  # cadence UDP d'iperf3 (défaut 1000 µs : salves qui heurtent un policer)
+
+
 @dataclass(frozen=True)
 class Banc:
-    """Adresses du banc (§7.3) : serveur iperf, IP source du client, port de destination."""
+    """Adresses du banc (§7.3) : serveur iperf, IP source du client, port de destination, outil."""
 
     serveur: str = "10.20.0.2"
     client: str = "10.10.0.2"
     port_destination: int = 50001
+    outil: str = "iperf2"  # ou « iperf3 » (#32, protocole 7.12)
 
 
 @dataclass(frozen=True)
@@ -166,35 +179,104 @@ class SystemeReel:
         logger.debug("fermer : fait")
 
 
+def _sources(t: plan.Test) -> tuple[int, ...]:
+    """Ports source d'un test ; ``(0,)`` pour l'ICMP (G2), sans port : une règle, un processus."""
+    return t.ports or (0,)
+
+
+def _commande_ping(e: plan.Execution, banc: Banc) -> list[str]:
+    """Commande ``ping`` d'un test ICMP (G2, protocole 7.11) : cadence fixe, TTL 64."""
+    logger.debug("_commande_ping : {}#{}", e.test.id, e.repetition)
+    t = e.test
+    nombre = round((t.duree_s or 0) / plan.INTERVALLE_PING_S)
+    cmd = ["ping", "-c", str(nombre), "-i", str(plan.INTERVALLE_PING_S), "-s", str(e.charge_udp),
+           "-t", "64", "-Q", f"{t.tos or 0:#04x}", "-I", banc.client, banc.serveur]  # fmt: skip
+    logger.debug("_commande_ping : {}", shlex.join(cmd))
+    return cmd
+
+
 def _commentaire(e: plan.Execution, port: int) -> str:
     """Commentaire de la règle nft d'un port : identifie test, répétition et port."""
     return f"efv {e.test.id}#{e.repetition} {port}"
 
 
-def commande_iperf(e: plan.Execution, port: int, banc: Banc) -> list[str]:
-    """Commande iperf2 d'une exécution pour un port source (§7.7).
+def commande_iperf(
+    e: plan.Execution, port: int, banc: Banc, port_destination: int | None = None
+) -> list[str]:
+    """Commande iperf2 (ou iperf3 selon ``banc.outil``) d'une exécution pour un port source (§7.7).
+
+    Args:
+        e: Exécution.
+        port: Port source.
+        banc: Adresses et outil du banc.
+        port_destination: Port du serveur imposé (iperf3 : un serveur par processus simultané).
 
     Raises:
-        ValueError: Test manuel, ou débit contractuel (``% cir``) non fourni.
+        ValueError: Test manuel, débit contractuel (``% cir``) non fourni, ou outil inconnu.
     """
-    logger.debug("commande_iperf : {}#{} port {}", e.test.id, e.repetition, port)
+    logger.debug("commande_iperf : {}#{} port {} ({})", e.test.id, e.repetition, port, banc.outil)
     t = e.test
+    if banc.outil not in OUTILS:
+        logger.debug("commande_iperf : outil inconnu")
+        raise ValueError(f"outil {banc.outil!r} inconnu ({', '.join(OUTILS)})")
     if t.protocole is None:
         logger.debug("commande_iperf : test manuel")
         raise ValueError(f"{t.id} : test manuel, pas de commande iperf")
+    if t.protocole == "icmp":
+        cmd = _commande_ping(e, banc)
+        logger.debug("commande_iperf : ping")
+        return cmd
     if e.debit_bps is None and t.debit is not None and t.debit.base == "cir":
         logger.debug("commande_iperf : CIR manquant")
         raise ValueError(f"{t.id} : débit contractuel de la classe non fourni (--cir)")
-    cmd = ["iperf", "-c", banc.serveur]
+    iperf3 = banc.outil == "iperf3"
+    dport = port_destination or t.port_destination or banc.port_destination
+    cmd = ["iperf3" if iperf3 else "iperf", "-c", banc.serveur]
     if t.protocole == "udp":
         cmd += ["-u", "-l", str(e.charge_udp)]
     if e.iperf_b is not None:
         cmd += ["-b", e.iperf_b]
-    cmd += ["-p", str(t.port_destination or banc.port_destination)]
+    elif iperf3 and t.protocole == "udp":
+        cmd += ["-b", "0"]  # iperf3 limite l'UDP à 1 Mbit/s sans -b : 0 = sans limite
+    cmd += ["-p", str(dport)]
     cmd += ["-t", str(t.duree_s)] if t.duree_s is not None else ["-n", str(t.volume_octets)]
-    cmd += ["-i", "10", "-e", "-B", f"{banc.client}:{port}", "-S", f"{t.tos or 0:#04x}"]
+    if iperf3:
+        cmd += ["-i", "10", "-B", banc.client, "--cport", str(port), "-S", f"{t.tos or 0:#04x}"]
+        if t.protocole == "udp":
+            cmd += ["--pacing-timer", str(PACING_IPERF3_US)]
+        cmd += ["-J", "--get-server-output"]
+    else:
+        cmd += ["-i", "10", "-e", "-B", f"{banc.client}:{port}", "-S", f"{t.tos or 0:#04x}"]
     logger.debug("commande_iperf : {}", shlex.join(cmd))
     return cmd
+
+
+def ports_destination(lancement: Lancement, banc: Banc) -> dict[tuple[str, int], int]:
+    """Port de destination de chaque processus d'un lancement, par (test, port source).
+
+    iperf2 : le port du test ou du banc pour tous. iperf3 : un serveur ne sert qu'un client à la
+    fois, chaque processus simultané reçoit le port suivant (``base``, ``base + 1``…).
+    """
+    logger.debug("ports_destination : {}#{} ({})", lancement.cle, lancement.repetition, banc.outil)
+    ports: dict[tuple[str, int], int] = {}
+    paires = [(e, port) for e in lancement.executions for port in e.test.ports]
+    for i, (e, port) in enumerate(paires):
+        base = e.test.port_destination or banc.port_destination
+        ports[(e.test.id, port)] = base + i if banc.outil == "iperf3" else base
+    logger.debug("ports_destination : {}", sorted(set(ports.values())))
+    return ports
+
+
+def serveurs_iperf3(lancements_: Sequence[Lancement], banc: Banc) -> str:
+    """Commande des serveurs iperf3 à lancer sur le serveur du banc (vide en iperf2)."""
+    logger.debug("serveurs_iperf3 : {} lancement(s)", len(lancements_))
+    if banc.outil != "iperf3":
+        logger.debug("serveurs_iperf3 : iperf2, un serveur suffit")
+        return ""
+    ports = sorted({p for la in lancements_ for p in ports_destination(la, banc).values()})
+    texte = f"for p in {' '.join(map(str, ports))}; do iperf3 -s -p $p -D; done" if ports else ""
+    logger.debug("serveurs_iperf3 : {} port(s)", len(ports))
+    return texte
 
 
 def lancements(execs: Sequence[plan.Execution]) -> list[Lancement]:
@@ -222,6 +304,11 @@ def _regle_nft(e: plan.Execution, port: int) -> list[str]:
     """Règle ``counter`` d'un port source."""
     logger.debug("_regle_nft : {}#{} port {}", e.test.id, e.repetition, port)
     proto = e.test.protocole or ""
+    if proto == "icmp":  # pas de port : les echo-request du client pendant le test
+        regle = ["nft", "add", "rule", *TABLE, CHAINE, "icmp", "type", "echo-request", "counter",
+                 "comment", f'"{_commentaire(e, port)}"']  # fmt: skip
+        logger.debug("_regle_nft : {}", regle)
+        return regle
     regle = ["nft", "add", "rule", *TABLE, CHAINE, proto, "sport", str(port), "counter",
              "comment", f'"{_commentaire(e, port)}"']  # fmt: skip
     logger.debug("_regle_nft : {}", regle)
@@ -257,19 +344,32 @@ def lire_compteurs(json_nft: str) -> dict[str, tuple[int, int, int]]:
 
 
 def _ligne(
-    e: plan.Execution, debut: int, fin: int, paquets: int, octets: int, banc: Banc
+    e: plan.Execution,
+    debut: int,
+    fin: int,
+    paquets: int,
+    octets: int,
+    banc: Banc,
+    dports: Sequence[int] = (),
 ) -> list[str]:
     """Ligne de ``resultats.csv`` d'une exécution (ordre de ``COLONNES``) ; le banc donne la clé
     de lecture dans ElastiFlow (``efv lire``)."""
     logger.debug("_ligne : {}#{}", e.test.id, e.repetition)
     t = e.test
-    ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    ports = ""
+    if t.ports:
+        ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    defaut = t.port_destination or banc.port_destination
+    bas, haut = (min(dports), max(dports)) if dports else (defaut, defaut)
+    dport = str(bas) if bas == haut else f"{bas}-{haut}"  # plage : iperf3, un serveur par processus
+    if t.cle == "ip":  # lecture sans ports (ICMP, fragments) : colonnes vides
+        ports = dport = ""
     ligne = [
         t.id, str(e.repetition), t.serie, t.groupe or "", t.protocole or "", e.iperf_b or "max",
         "" if t.taille is None else str(t.taille), f"{t.tos or 0:#04x}", ports,
         "nominal" if t.sampling is None else f"1:{t.sampling}",
         str(debut), str(fin), str(paquets), str(octets),
-        banc.client, banc.serveur, str(t.port_destination or banc.port_destination),
+        banc.client, banc.serveur, dport,
     ]  # fmt: skip
     logger.debug("_ligne : {} paquets, {} octets", paquets, octets)
     return ligne
@@ -301,8 +401,12 @@ def _executer_lancement(
         RuntimeError: iperf en échec, ou compteur nft introuvable.
     """
     logger.debug("_executer_lancement : {}#{}", lancement.cle, lancement.repetition)
-    paires = [(e, port) for e in lancement.executions for port in e.test.ports]
-    commandes = [(e, port, commande_iperf(e, port, banc)) for e, port in paires]
+    paires = [(e, port) for e in lancement.executions for port in _sources(e.test)]
+    dports = ports_destination(lancement, banc)
+    commandes = [
+        (e, port, commande_iperf(e, port, banc, dports.get((e.test.id, port))))
+        for e, port in paires
+    ]
     for e, port in paires:
         systeme.executer(_regle_nft(e, port))
     debut = systeme.maintenant()
@@ -318,7 +422,7 @@ def _executer_lancement(
     manquants: list[str] = []
     for e in lancement.executions:
         paquets = octets = 0
-        for port in e.test.ports:
+        for port in _sources(e.test):
             valeurs = compteurs.get(_commentaire(e, port))
             if valeurs is None:
                 manquants.append(_commentaire(e, port))
@@ -326,7 +430,8 @@ def _executer_lancement(
             handle, p, o = valeurs
             paquets, octets = paquets + p, octets + o
             systeme.executer(["nft", "delete", "rule", *TABLE, CHAINE, "handle", str(handle)])
-        lignes.append(_ligne(e, debut, fin, paquets, octets, banc))
+        dp = [dports[(e.test.id, port)] for port in e.test.ports]
+        lignes.append(_ligne(e, debut, fin, paquets, octets, banc, dp))
     if any(codes) or manquants:
         logger.debug("_executer_lancement : échec (codes {}, manquants {})", codes, manquants)
         raise RuntimeError(
@@ -341,14 +446,16 @@ def _simuler(lancement: Lancement, banc: Banc) -> list[str]:
     """Commandes qu'exécuterait un lancement (mode simulation)."""
     logger.debug("_simuler : {}#{}", lancement.cle, lancement.repetition)
     lignes = [f"# {lancement.cle} répétition {lancement.repetition}"]
+    dports = ports_destination(lancement, banc)
     if lancement.sampling is not None:
         lignes.append(f"# sampling de l'exporteur : 1:{lancement.sampling}")
     for e in lancement.executions:
         if e.test.prealable:
             lignes.append(f"# préalable : {e.test.prealable}")
-        for port in e.test.ports:
+        for port in _sources(e.test):
             lignes.append(shlex.join(_regle_nft(e, port)))
-            lignes.append(shlex.join(commande_iperf(e, port, banc)) + " &")
+            commande = commande_iperf(e, port, banc, dports.get((e.test.id, port)))
+            lignes.append(shlex.join(commande) + " &")
     lignes.append("wait")
     logger.debug("_simuler : {} ligne(s)", len(lignes))
     return lignes
@@ -392,7 +499,10 @@ def injecter(
     a_faire = lancements(retenues)
     for lancement in a_faire:  # contrôle avant d'injecter quoi que ce soit
         for e in lancement.executions:
-            commande_iperf(e, e.test.ports[0], banc)
+            commande_iperf(e, _sources(e.test)[0], banc)
+    serveurs = serveurs_iperf3(a_faire, banc)
+    if serveurs:
+        afficher(f"Serveurs iperf3 (un client à la fois par port), sur {banc.serveur} : {serveurs}")
     if dry_run:
         for lancement in a_faire:
             afficher("\n".join(_simuler(lancement, banc)))

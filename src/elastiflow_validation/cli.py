@@ -454,7 +454,8 @@ def commande_rapport(arguments: argparse.Namespace) -> int:
         arguments.sortie,
     )
     try:
-        n = rapport.rapport(arguments.resultats, arguments.lectures, arguments.sortie)
+        points = rapport.points_mesure(arguments.point_mesure)
+        n = rapport.rapport(arguments.resultats, arguments.lectures, arguments.sortie, points)
         if arguments.calibration:
             champs = lecture.charger_champs(arguments.champs)
             rapport.ecrire_calibration(
@@ -463,6 +464,7 @@ def commande_rapport(arguments: argparse.Namespace) -> int:
                 arguments.calibration,
                 champs,
                 arguments.ingest_lag_minutes,
+                points,
             )
     except (OSError, ValueError, KeyError) as exc:
         logger.error("rapport : {}", exc)
@@ -490,6 +492,13 @@ def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
         "--resultats", type=Path, default=Path("resultats.csv"), help="sortie d'injecter"
     )
     p.add_argument("--lectures", type=Path, default=Path("lectures.csv"), help="sortie de lire")
+    p.add_argument(
+        "--point-mesure",
+        action="append",
+        default=[],
+        metavar="EXPORTATEUR=IFINDEX",
+        help="échantillonneur retenu par exportateur (répétable, #30)",
+    )
     p.add_argument(
         "--sortie", type=Path, default=Path("rapport-validation.md"), help="fichier écrit"
     )

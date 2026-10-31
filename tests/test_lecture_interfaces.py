@@ -49,6 +49,7 @@ def test_requete_avec_et_sans_champs_facultatifs():
     sorties = aggs["entrees"]["aggs"]["sorties"]
     assert sorties["terms"]["field"] == "flow.output.ifindex" and "octets" in sorties["aggs"]
     assert aggs["echantillonneurs"]["terms"]["field"] == "flow.sampler.ifindex"
+    assert set(aggs["echantillonneurs"]["aggs"]) == {"octets", "paquets", "minutes"}
     nues = lecture.requete_test(_ligne(), lecture.CHAMPS_DEFAUT, banc)["aggs"]["exportateurs"][
         "aggs"
     ]

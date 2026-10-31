@@ -69,8 +69,9 @@ Le sampling-rate se règle **par interface**. Le débit à retenir est le débit
 
 | Critère | Seuil |
 | --- | --- |
-| Erreur de volume (séries A, B, C) | Dans la borne à 95 % : 196 ÷ √n, avec n le nombre d'échantillons du test |
+| Erreur de volume (séries A, B, C) | Toutes les mesures dans la borne globale à 95 % : z ÷ √n (Bonferroni, z ≈ 305 pour 22 mesures), avec n le nombre d'échantillons du test |
 | Plancher (A2) | Erreur ≤ 5 % avec le sampling recommandé |
+| Débit constant (A, C2) | Aucune minute utile sans échantillon, aucun pic au-delà de 1,82 × 196 ÷ √n_minute (28 minutes), au plus 4 minutes sur 28 hors de 196 ÷ √n_minute (`efv lire --stabilite`, recalcul dans `efv rapport --series series.csv`). Sans série : non évalué, pas validé. |
 | Absence de biais | Sur 3 répétitions, la moyenne des erreurs est proche de 0 |
 | Détection au plancher (A1) | Fréquence de détection cohérente avec 1 − exp(−n attendu) |
 | Marquage (Q1) | 100 % des DSCP émis retrouvés au point A ; écarts au point B expliqués par la politique de l'opérateur |
@@ -197,17 +198,17 @@ D2 et D3 sont ajoutés en second temps si les résultats de D1 le justifient.
 | ID | Test | Attendu | Mesuré | Statut |
 | --- | --- | --- | --- | --- |
 | G1 | Deux VLAN (routage inter-VLAN) | VLAN source et destination, interfaces d'entrée et de sortie |  | ☐ OK ☐ KO |
-| G2 | ICMP (`ping -s 1000`) | Protocole ICMP, sans ports |  | ☐ OK ☐ KO |
+| G2 | ICMP (`ping -i 0.2 -s 1000 -t 64`, 300 s à 1:8, `efv injecter`) | Protocole ICMP, sans ports ; paquets dans la borne à 95 % des 1500 echo-request comptés par nft |  | ☐ OK ☐ KO |
 | G3 | Flags TCP (connexions courtes en nombre connu) | SYN, FIN, RST en proportion du nombre de connexions |  | ☐ OK ☐ KO |
 | G4 | IPv6 | Adresses et classe de trafic corrects |  | ☐ OK ☐ KO |
-| G5 | Fragmentation (UDP de 3000 o) | Fragments suivants sans ports, noté |  | ☐ OK ☐ KO |
+| G5 | Fragmentation (UDP de 3000 o, 300 s à 1:8, `efv injecter`, lecture sans ports) | Fragments suivants sans ports ; paquets ≈ 2 × nft, octets ≈ nft + 20 o par datagramme |  | ☐ OK ☐ KO |
 | G6 | Compteurs d'interface (intervalle de 30 s) | Utilisation calculée par ElastiFlow = `display counters rate` du switch |  | ☐ OK ☐ KO |
 
 ## 8. Synthèse chiffrée des erreurs
 
-Octets de référence : compteurs nft du client, dans la base établie en P5. Erreur = (ElastiFlow − référence) ÷ référence. Borne à 95 % = 196 ÷ √n, avec n = paquets réels ÷ sampling-rate.
+Octets de référence : compteurs nft du client, dans la base établie en P5. Erreur = (ElastiFlow − référence) ÷ référence. Borne globale à 95 % = z ÷ √n, avec n = paquets réels ÷ sampling-rate et z = 100 × Φ⁻¹(1 − 0,05 ÷ 2m) pour m mesures (Bonferroni, protocole §10.3).
 
-| ID | Octets de référence | Octets ElastiFlow | Échantillons n | Erreur observée | Borne à 95 % | Conforme |
+| ID | Octets de référence | Octets ElastiFlow | Échantillons n | Erreur observée | Borne globale à 95 % | Conforme |
 | --- | --- | --- | --- | --- | --- | --- |
 | A1 |  |  |  |  |  | ☐ |
 | A2 (1) |  |  |  |  |  | ☐ |
@@ -312,7 +313,7 @@ rapportés comme « observés, non contractuels ».
 **Précision d'un échantillonnage 1:N** (95 % de confiance) :
 
 - n = paquets réels ÷ sampling-rate
-- borne (%) = 196 ÷ √n
+- borne (%) d'une mesure isolée = 196 ÷ √n ; borne globale pour m mesures = z ÷ √n, z = 100 × Φ⁻¹(1 − 0,05 ÷ 2m) (≈ 305 pour 22)
 - échantillons nécessaires pour 5 % : n ≈ 1 537 (20 à 30 % de marge pour des octets avec tailles variables)
 - probabilité de détecter un flux : 1 − exp(−n attendu)
 

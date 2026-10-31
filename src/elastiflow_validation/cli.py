@@ -271,7 +271,11 @@ def _ligne_plan(e: plan.Execution) -> list[str]:
         if t.duree_s is not None
         else f"-n {plan.format_debit(t.volume_octets or 0)}"
     )
-    ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    ports = ""  # ICMP (G2) : pas de port
+    if t.ports:
+        ports = str(t.ports[0]) if len(t.ports) == 1 else f"{t.ports[0]}-{t.ports[-1]}"
+    if t.cle == "ip":
+        ports = f"{ports} (lu sans ports)".strip()
     port = "" if t.port_destination is None else f"port destination {t.port_destination}"
     notes = [x for x in ("lab" if t.lab else "", port, t.prealable or "") if x]
     valeurs = [
@@ -450,7 +454,16 @@ def commande_rapport(arguments: argparse.Namespace) -> int:
         arguments.sortie,
     )
     try:
-        n = rapport.rapport(arguments.resultats, arguments.lectures, arguments.sortie)
+        points = rapport.points_mesure(arguments.point_mesure)
+        n = rapport.rapport(
+            arguments.resultats,
+            arguments.lectures,
+            arguments.sortie,
+            points,
+            arguments.series,
+            arguments.bord,
+            arguments.cv,
+        )
         if arguments.calibration:
             champs = lecture.charger_champs(arguments.champs)
             rapport.ecrire_calibration(
@@ -459,6 +472,7 @@ def commande_rapport(arguments: argparse.Namespace) -> int:
                 arguments.calibration,
                 champs,
                 arguments.ingest_lag_minutes,
+                points,
             )
     except (OSError, ValueError, KeyError) as exc:
         logger.error("rapport : {}", exc)
@@ -475,7 +489,9 @@ def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
         "rapport",
         help="comparaison ElastiFlow / référence et document VAL-ELASTIFLOW-001 (§10)",
         description=(
-            "Pour chaque test lu : erreur, borne à 95 % (196 ÷ √n), conformité, biais moyen sur "
+            "Pour chaque test lu : erreur, borne globale à 95 % (Bonferroni : z ÷ √n, "
+            "z ≈ 3,05 pour 22 "
+            "mesures), conformité, biais moyen sur "
             "les répétitions de A2/A3/A5. Écrit les sections 7, 8 et 10 de VAL-ELASTIFLOW-001 "
             "remplies ; le verdict signé reste à compléter."
         ),
@@ -484,6 +500,16 @@ def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
         "--resultats", type=Path, default=Path("resultats.csv"), help="sortie d'injecter"
     )
     p.add_argument("--lectures", type=Path, default=Path("lectures.csv"), help="sortie de lire")
+    p.add_argument(
+        "--point-mesure",
+        action="append",
+        default=[],
+        metavar="EXPORTATEUR=IFINDEX",
+        help="échantillonneur retenu par exportateur (répétable, #30)",
+    )
+    p.add_argument("--series", type=Path, help="minutes brutes issues de lire, pour A et C2 (#31)")
+    p.add_argument("--bord", type=int, default=lecture.BORD_S, help="même bord que lors de lire")
+    p.add_argument("--cv", type=float, default=0.0, help="CV des tailles pour la stabilité")
     p.add_argument(
         "--sortie", type=Path, default=Path("rapport-validation.md"), help="fichier écrit"
     )
@@ -534,6 +560,15 @@ def _ajouter_lire(sous: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--bord", type=int, default=lecture.BORD_S, help="bord exclu de la fenêtre utile, en s"
     )
+    p.add_argument(
+        "--series", type=Path, help="série par minute utile de chaque test (CSV, §9.3, #31)"
+    )
+    p.add_argument(
+        "--stabilite", type=Path, help="verdict de constance du débit par test (CSV, §10.1)"
+    )
+    p.add_argument(
+        "--cv", type=float, default=0.0, help="CV des tailles de paquets pour la borne (défaut 0)"
+    )
     banc = injection.Banc()
     p.add_argument("--serveur", default=banc.serveur, help="à défaut de colonne serveur")
     p.add_argument("--client", default=banc.client, help="à défaut de colonne client")
@@ -564,6 +599,9 @@ def commande_lire(arguments: argparse.Namespace, client: lecture.Client | None =
             delai_s=arguments.delai,
             bord_s=arguments.bord,
             maintenant=time.time,
+            series=arguments.series,
+            verdicts=arguments.stabilite,
+            cv=arguments.cv,
         )
     except (OSError, ValueError) as exc:
         logger.error("lire : {}", exc)

@@ -30,6 +30,7 @@ from typing import Protocol
 import yaml
 from loguru import logger
 
+from elastiflow_validation import stabilite
 from elastiflow_validation.injection import Banc
 
 __all__ = [
@@ -96,6 +97,7 @@ COLONNES_LECTURE = (
     "interfaces",
     "echantillonneurs",
     "double_echantillonnage",
+    "volumes_echantillonneurs",
 )
 
 
@@ -284,19 +286,14 @@ def requete_test(
     """Corps ``_search`` d'un test : filtre sur la clé et la fenêtre, agrégations par exportateur.
 
     Les colonnes ``client``, ``serveur`` et ``port_destination`` de la ligne priment sur ``banc``
-    (fichiers produits avant leur ajout : valeurs du banc).
+    (fichiers produits avant leur ajout : valeurs du banc). ``ports`` vide : clé IP et protocole
+    seuls (tests ``cle: ip`` du plan, G2 et G5).
     """
     logger.debug("requete_test : entrée {}#{}", ligne["id"], ligne["repetition"])
-    bas, haut = _ports(ligne["ports"])
     debut, fin = int(ligne["debut"]), int(ligne["fin"])
     filtres: list[dict] = [
         {"term": {champs["ip_source"]: ligne.get("client") or banc.client}},
         {"term": {champs["ip_destination"]: ligne.get("serveur") or banc.serveur}},
-        {"range": {champs["port_source"]: {"gte": bas, "lte": haut}}},
-        _filtre_port_destination(
-            champs["port_destination"],
-            ligne.get("port_destination") or str(banc.port_destination),
-        ),
         {
             "range": {
                 champs["horodatage"]: {
@@ -307,6 +304,15 @@ def requete_test(
             }
         },
     ]
+    if ligne.get("ports"):  # vide : clé sans ports (ICMP, fragments sans en-tête L4, #33)
+        bas, haut = _ports(ligne["ports"])
+        filtres.append({"range": {champs["port_source"]: {"gte": bas, "lte": haut}}})
+        filtres.append(
+            _filtre_port_destination(  # plage possible : iperf3, un serveur par processus
+                champs["port_destination"],
+                ligne.get("port_destination") or str(banc.port_destination),
+            )
+        )
     if ligne.get("protocole"):
         filtres.append({"term": {champs["protocole"]: ligne["protocole"]}})
     sommes = {
@@ -334,7 +340,8 @@ def requete_test(
         }
     if champs.get("echantillonneur"):
         par_exportateur["echantillonneurs"] = {
-            "terms": {"field": champs["echantillonneur"], "size": 10}
+            "terms": {"field": champs["echantillonneur"], "size": 100, "missing": -1},
+            "aggs": {**sommes, "minutes": par_exportateur["minutes"]},
         }
     corps = {
         "size": 0,
@@ -347,7 +354,7 @@ def requete_test(
             }
         },
     }
-    logger.debug("requete_test : sortie ports {}-{}", bas, haut)
+    logger.debug("requete_test : sortie ports {}", ligne.get("ports") or "aucun")
     return corps
 
 
@@ -388,6 +395,27 @@ def _double(exp: dict) -> str:
     return double
 
 
+def _volumes_echantillonneurs(exp: dict) -> str:
+    """Volumes par point de mesure, sans dédupliquer arbitrairement les totaux."""
+    logger.debug("_volumes_echantillonneurs : entrée")
+    agg = exp.get("echantillonneurs", {})
+    if agg.get("sum_other_doc_count", 0) or agg.get("doc_count_error_upper_bound", 0):
+        logger.debug("_volumes_echantillonneurs : agrégation tronquée")
+        raise ValueError("échantillonneurs tronqués : réduire le périmètre de lecture")
+    volumes = {
+        str(b["key"]): {
+            "octets": round(b["octets"]["value"]),
+            "paquets": round(b["paquets"]["value"]),
+            "enregistrements": b["doc_count"],
+        }
+        for b in agg.get("buckets", [])
+        if "octets" in b and "paquets" in b
+    }
+    texte = json.dumps(volumes, sort_keys=True) if volumes else ""
+    logger.debug("_volumes_echantillonneurs : sortie {} point(s)", len(volumes))
+    return texte
+
+
 def lire_test(
     client: Client,
     index: str,
@@ -396,8 +424,12 @@ def lire_test(
     banc: Banc,
     delai_s: int = DELAI_S,
     bord_s: int = BORD_S,
+    series: list[stabilite.Serie] | None = None,
 ) -> list[list[str]]:
-    """Lignes de ``lectures.csv`` d'un test, une par exportateur (aucune si rien n'est indexé)."""
+    """Lignes de ``lectures.csv`` d'un test, une par exportateur (aucune si rien n'est indexé).
+
+    ``series`` : si fourni, reçoit la série par minute utile de chaque exportateur (#31).
+    """
     logger.debug("lire_test : entrée {}#{}", ligne["id"], ligne["repetition"])
     corps = requete_test(ligne, champs, banc, delai_s)
     reponse = client.requete("POST", f"/{index}/_search", corps)
@@ -421,11 +453,22 @@ def lire_test(
                 _interfaces(exp), _valeurs(exp.get("echantillonneurs", {})), _double(exp),
             ]
         )  # fmt: skip
-        if lignes[-1][-1]:
+        if _double(exp):
             logger.warning(
                 "{}#{} : {} vu par plusieurs échantillonneurs ({}) : double comptage probable",
-                ligne["id"], ligne["repetition"], exp["key"], lignes[-1][-2],
+                ligne["id"], ligne["repetition"], exp["key"], _valeurs(exp["echantillonneurs"]),
             )  # fmt: skip
+        lignes[-1].append(_volumes_echantillonneurs(exp))
+        if series is not None:
+            serie = stabilite.serie_minutes(minutes, utile_bas, utile_haut)
+            series.append((ligne["id"], ligne["repetition"], str(exp["key"]), serie))
+            for point in exp.get("echantillonneurs", {}).get("buckets", []):
+                serie = stabilite.serie_minutes(
+                    point.get("minutes", {}).get("buckets", []), utile_bas, utile_haut
+                )
+                series.append(
+                    (ligne["id"], ligne["repetition"], str(exp["key"]), serie, str(point["key"]))
+                )
     logger.debug("lire_test : sortie {} exportateur(s)", len(lignes))
     return lignes
 
@@ -440,8 +483,14 @@ def lire(
     delai_s: int = DELAI_S,
     bord_s: int = BORD_S,
     maintenant: Callable[[], float] | None = None,
+    series: Path | None = None,
+    verdicts: Path | None = None,
+    cv: float = 0.0,
 ) -> int:
     """Lit chaque test de ``resultats`` et écrit ``sortie`` (``lectures.csv``, réécrit).
+
+    ``series`` et ``verdicts`` (facultatifs, #31) : série par minute utile de chaque test et
+    exportateur, et verdict de constance du débit (``stabilite.juger``, CV des tailles ``cv``).
 
     Les tests dont la fenêtre n'est pas close (fin + délai dans le futur) sont écartés : leurs
     enregistrements ne sont pas encore tous indexés (§9.3).
@@ -483,8 +532,11 @@ def lire(
             logger.warning("lecture différée (délai d'agrégation non écoulé) : {}", en_attente)
         tests = [t for t in tests if int(t["fin"]) + delai_s <= limite]
     lignes: list[list[str]] = []
+    collecte: list[stabilite.Serie] | None = None
+    if series is not None or verdicts is not None:
+        collecte = []
     for t in tests:
-        lus = lire_test(client, index, t, champs, banc, delai_s, bord_s)
+        lus = lire_test(client, index, t, champs, banc, delai_s, bord_s, collecte)
         if not lus:
             logger.warning("{}#{} : aucun enregistrement dans ElastiFlow", t["id"], t["repetition"])
         lignes += lus
@@ -492,5 +544,11 @@ def lire(
         ecrivain = csv.writer(f, lineterminator="\n")
         ecrivain.writerow(COLONNES_LECTURE)
         ecrivain.writerows(lignes)
+    if series is not None:
+        stabilite.ecrire_series(series, collecte or [], cv)
+    if verdicts is not None:
+        instables = stabilite.ecrire_verdicts(verdicts, collecte or [], cv)
+        if instables:
+            logger.warning("{} série(s) au débit non constant -> {}", instables, verdicts)
     logger.debug("lire : sortie {} test(s), {} ligne(s)", len(tests), len(lignes))
     return len(tests)

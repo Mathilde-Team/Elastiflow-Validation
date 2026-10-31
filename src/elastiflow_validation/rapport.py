@@ -7,8 +7,9 @@ Pour chaque test de ``resultats.csv`` lu dans ``lectures.csv`` (jointure sur ``i
 
 - erreur (%) = (octets ElastiFlow − octets de référence) ÷ octets de référence × 100 ;
 - n attendu = paquets réels ÷ sampling-rate du test ;
-- borne à 95 % = 196 ÷ √n (protocole §10.3) ;
-- conforme : |erreur| ≤ borne.
+- borne globale à 95 % = z ÷ √n, avec z = 100·Φ⁻¹(1 − 0,05 ÷ 2m) pour les m mesures calculables
+  (Bonferroni, protocole §10.3, #9 : ≈ 305 ÷ √n pour 22 mesures) ;
+- conforme : |erreur| ≤ borne ; le verdict exige que toutes les mesures soient conformes.
 
 Le biais moyen couvre les répétitions de A2, A3 et A5 (VAL §8) ; la comparaison avant/après
 correction du sampling apparie chaque test ``X-4096`` à son homologue ``X``. Le document produit
@@ -20,17 +21,24 @@ sont laissées vides.
 from __future__ import annotations
 
 import csv
+import json
+import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 from loguru import logger
 
+from elastiflow_validation import stabilite
+from elastiflow_validation.calcul import z_bonferroni
+from elastiflow_validation.lecture import BORD_S, fenetre_utile
+
 __all__ = [
     "Analyse",
     "analyser",
+    "bornes_bonferroni",
     "biais_moyen",
     "comparaison_sampling",
     "construire_calibration_yaml",
@@ -39,7 +47,6 @@ __all__ = [
     "rapport",
 ]
 
-BORNE = 196.0
 SERIES_BIAIS = ("A2", "A3", "A5")
 SUFFIXE_ANCIEN_SAMPLING = "-4096"
 # Clés de lecture (CHAMPS_DEFAUT) traduites vers les clés de ``elastiflow.FIELDS`` de qos-audit.
@@ -81,6 +88,8 @@ class Analyse:
     erreur_pct: float | None
     borne_pct: float | None
     conforme: bool | None
+    point_mesure: str = ""
+    stabilite: stabilite.Verdict | None = None
 
     @property
     def cle(self) -> str:
@@ -100,7 +109,51 @@ def _sampling_effectif(resultat: dict[str, str], lecture: dict[str, str]) -> int
     return valeur
 
 
-def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]:
+def points_mesure(choix: Sequence[str]) -> dict[str, str]:
+    """Parse les choix répétés ``EXPORTATEUR=IFINDEX``, sans doublon ambigu."""
+    logger.debug("points_mesure : entrée {} choix", len(choix))
+    points: dict[str, str] = {}
+    for texte in choix:
+        nom, separateur, interface = texte.rpartition("=")
+        if not separateur or not nom.strip() or not interface.isdigit() or nom in points:
+            logger.debug("points_mesure : choix invalide")
+            raise ValueError(
+                "point de mesure attendu : EXPORTATEUR=IFINDEX, unique par exportateur"
+            )
+        points[nom] = interface
+    logger.debug("points_mesure : sortie {} choix", len(points))
+    return points
+
+
+def _selectionner(lecture: dict[str, str], points: dict[str, str]) -> tuple[dict[str, str], str]:
+    """Retient le volume du point demandé ; refuse un double comptage non résolu."""
+    logger.debug("_selectionner : entrée")
+    point = points.get(lecture["exportateur"], "")
+    echantillonneurs = set(filter(None, lecture.get("echantillonneurs", "").split(";")))
+    double = lecture.get("double_echantillonnage") == "oui" or len(echantillonneurs) > 1
+    if double and not point:
+        logger.debug("_selectionner : double comptage non résolu")
+        raise ValueError(f"{lecture['exportateur']} : choisir --point-mesure EXPORTATEUR=IFINDEX")
+    if point:
+        volumes = json.loads(lecture.get("volumes_echantillonneurs") or "{}")
+        if not isinstance(volumes, dict) or point not in volumes:
+            logger.debug("_selectionner : volume du point absent")
+            raise ValueError(f"{lecture['exportateur']} : point {point} absent ; relancer efv lire")
+        volume = volumes[point]
+        if not isinstance(volume, dict) or any(
+            not isinstance(volume.get(c), int) or isinstance(volume.get(c), bool) or volume[c] < 0
+            for c in ("octets", "paquets", "enregistrements")
+        ):
+            logger.debug("_selectionner : volume invalide")
+            raise ValueError("volumes_echantillonneurs : entiers positifs ou nuls attendus")
+        lecture = lecture | {c: str(volume[c]) for c in ("octets", "paquets", "enregistrements")}
+    logger.debug("_selectionner : sortie point {}", point or "total")
+    return lecture, point
+
+
+def analyser(
+    resultats: Path, lectures: Path, points: dict[str, str] | None = None
+) -> tuple[list[Analyse], list[str]]:
     """Joint ``resultats.csv`` et ``lectures.csv`` et calcule chaque mesure.
 
     Returns:
@@ -120,23 +173,18 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
         if reference is None:
             logger.warning("lecture sans résultat injecté : {}#{}", cle[0], cle[1])
             continue
+        lecture, point = _selectionner(lecture, points or {})
         vus.add(cle)
         octets_reference = int(reference["octets"] or 0)
         paquets_reference = int(reference["paquets"] or 0)
         sampling = _sampling_effectif(reference, lecture)
         octets_elastiflow = int(lecture["octets"] or 0)
         n_attendu = paquets_reference / sampling if sampling and paquets_reference else 0.0
-        borne = BORNE / n_attendu**0.5 if n_attendu else None
         erreur = (
             (octets_elastiflow - octets_reference) / octets_reference * 100.0
             if octets_reference
             else None
         )
-        conforme: bool | None
-        if erreur is None or borne is None:
-            conforme = None
-        else:
-            conforme = abs(erreur) <= borne
         analyses.append(
             Analyse(
                 id=reference["id"],
@@ -157,13 +205,119 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
                 sampling_lu=str(lecture.get("sampling") or ""),
                 n_attendu=n_attendu,
                 erreur_pct=erreur,
-                borne_pct=borne,
-                conforme=conforme,
+                borne_pct=None,
+                conforme=None,
+                point_mesure=point,
             )
         )
+    analyses = bornes_bonferroni(analyses)
     non_lus = [f"{i} ({r})" for (i, r) in lignes_reference if (i, r) not in vus]
     logger.debug("analyser : sortie | {} analyse(s), {} non lu(s)", len(analyses), len(non_lus))
     return analyses, non_lus
+
+
+def bornes_bonferroni(analyses: Sequence[Analyse]) -> list[Analyse]:
+    """Borne et conformité de chaque mesure, corrigées de Bonferroni pour l'ensemble (#9).
+
+    Les m mesures calculables (erreur et n connus) sont jugées ensemble : chacune reçoit la borne
+    ``z_bonferroni(m) ÷ √n``. Une mesure non calculable garde ``borne_pct`` et ``conforme`` à
+    ``None`` et n'entre pas dans m.
+    """
+    logger.debug("bornes_bonferroni : entrée | {} analyse(s)", len(analyses))
+    calculables = [a for a in analyses if a.erreur_pct is not None and a.n_attendu > 0]
+    if not calculables:
+        logger.debug("bornes_bonferroni : sortie | aucune mesure calculable")
+        return list(analyses)
+    z = z_bonferroni(len(calculables))
+    resultat: list[Analyse] = []
+    for a in analyses:
+        if a.erreur_pct is None or a.n_attendu <= 0:
+            resultat.append(a)
+            continue
+        borne = z / a.n_attendu**0.5
+        resultat.append(replace(a, borne_pct=borne, conforme=abs(a.erreur_pct) <= borne))
+    logger.debug("bornes_bonferroni : sortie | m={} z={:.1f}", len(calculables), z)
+    return resultat
+
+
+def ajouter_stabilite(
+    analyses: Sequence[Analyse], series: Path, bord_s: int = BORD_S, cv: float = 0.0
+) -> list[Analyse]:
+    """Recalcule la stabilité depuis les minutes brutes, sans croire les verdicts du CSV."""
+    logger.debug("ajouter_stabilite : entrée {} analyse(s)", len(analyses))
+    if bord_s < 0 or not math.isfinite(cv) or cv < 0:
+        logger.debug("ajouter_stabilite : paramètres invalides")
+        raise ValueError("bord et CV doivent être positifs ou nuls et finis")
+    groupes: dict[tuple[str, str, str, str], dict[int, stabilite.Minute]] = {}
+    with series.open(encoding="utf-8", newline="") as fichier:
+        lecteur = csv.DictReader(fichier)
+        requis = {"id", "repetition", "exportateur", "minute", "echantillons", "octets", "paquets"}
+        if not requis <= set(lecteur.fieldnames or []):
+            logger.debug("ajouter_stabilite : colonnes absentes")
+            raise ValueError("series.csv : colonnes requises absentes")
+        for ligne in lecteur:
+            cle = (
+                ligne["id"],
+                ligne["repetition"],
+                ligne["exportateur"],
+                ligne.get("echantillonneur") or "",
+            )
+            minute = stabilite.Minute(
+                int(ligne["minute"]),
+                int(ligne["echantillons"]),
+                float(ligne["octets"]),
+                float(ligne["paquets"]),
+            )
+            groupe = groupes.setdefault(cle, {})
+            if (
+                minute.debut % 60
+                or minute.debut in groupe
+                or minute.echantillons < 0
+                or any(not math.isfinite(v) or v < 0 for v in (minute.octets, minute.paquets))
+            ):
+                logger.debug("ajouter_stabilite : minute invalide ou dupliquée")
+                raise ValueError("series.csv : minute invalide ou dupliquée")
+            groupe[minute.debut] = minute
+    resultat = []
+    for a in analyses:
+        if a.id.startswith("A") or a.id.removesuffix("-4096") == "C2":
+            groupe = groupes.get((a.id, a.repetition, a.exportateur, a.point_mesure), {})
+            bas, haut = fenetre_utile(a.debut, a.fin, bord_s)
+            minutes = [
+                groupe.get(m, stabilite.Minute(m, 0, 0.0, 0.0)) for m in range(bas, haut, 60)
+            ]
+            a = replace(a, stabilite=stabilite.juger(minutes, cv))
+        resultat.append(a)
+    logger.debug("ajouter_stabilite : sortie {} analyse(s)", len(resultat))
+    return resultat
+
+
+def _synthese_stabilite(analyses: Sequence[Analyse]) -> list[str]:
+    """Sépare le critère de volume du critère temporel (A et C2)."""
+    logger.debug("_synthese_stabilite : entrée")
+    lignes = [
+        "### Constance du débit (A, C2)",
+        "",
+        "| Test | Exportateur | Point | Stable | Minutes vides | Pics | Motif |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for a in analyses:
+        if not (a.id.startswith("A") or a.id.removesuffix("-4096") == "C2"):
+            continue
+        v = a.stabilite
+        if v is None:
+            lignes.append(
+                f"| {a.cle} | {a.exportateur} | {a.point_mesure} | non évalué | | | "
+                "fournir --series ; un volume conforme ne prouve pas la stabilité |"
+            )
+        else:
+            lignes.append(
+                f"| {a.cle} | {a.exportateur} | {a.point_mesure} | "
+                f"{'oui' if v.stable else 'non'} | {v.minutes_vides} | {v.pics} | {v.motif} |"
+            )
+    lignes.append("")
+    logger.debug("_synthese_stabilite : sortie")
+    return lignes
 
 
 def biais_moyen(analyses: Sequence[Analyse]) -> float | None:
@@ -216,11 +370,12 @@ def _fiche(a: Analyse) -> list[str]:
         f"| Début / fin (epoch) | {a.debut} / {a.fin} |",
         f"| Référence : paquets / octets IP (nft) | {a.paquets_reference} / {a.octets_reference} |",
         f"| ElastiFlow : exportateur, sampling-rate lu | {a.exportateur}, {a.sampling_lu} |",
+        f"| Point de mesure (ifindex échantillonneur) | {a.point_mesure or 'total exportateur'} |",
         f"| ElastiFlow : enregistrements, paquets, octets | {a.enregistrements}, "
         f"{a.paquets_elastiflow}, {a.octets_elastiflow} |",
         f"| Échantillons attendus n | {a.n_attendu:.0f} |",
         f"| Erreur observée (%) | {_pct(a.erreur_pct)} |",
-        f"| Borne à 95 % (%) | {_pct(a.borne_pct)} |",
+        f"| Borne globale à 95 % (%) | {_pct(a.borne_pct)} |",
         f"| Conforme | {conforme} |",
         "",
     ]
@@ -233,7 +388,7 @@ def _synthese(analyses: Sequence[Analyse]) -> list[str]:
     logger.debug("_synthese : entrée | {} analyse(s)", len(analyses))
     lignes = [
         "| ID | Exportateur | Octets de référence | Octets ElastiFlow | Échantillons n | "
-        "Erreur observée | Borne à 95 % | Conforme |",
+        "Erreur observée | Borne globale à 95 % | Conforme |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for a in sorted(analyses, key=lambda x: (x.id, x.repetition, x.exportateur)):
@@ -262,6 +417,22 @@ def _conclusion(analyses: Sequence[Analyse]) -> list[str]:
         passes = sum(1 for a in groupe if a.conforme)
         lignes.append(f"| {nom} | {passes} / {len(groupe)} | |")
     lignes.append("")
+    jugees = [a for a in analyses if a.conforme is not None]
+    if jugees:
+        conformes = sum(1 for a in jugees if a.conforme)
+        z = f"{z_bonferroni(len(jugees)) / 100:.2f}".replace(".", ",")
+        lignes.append(
+            "**Critère global de volume** (protocole §10.3, "
+            f"Bonferroni sur m = {len(jugees)} mesures, "
+            f"z = {z}) : "
+            f"{conformes} / {len(jugees)} mesures dans leur borne ; "
+            + (
+                "toutes conformes, critère rempli."
+                if conformes == len(jugees)
+                else "critère non rempli."
+            )
+        )
+        lignes.append("")
     lignes.append(
         "**Périmètre de validité** (protocole §10.4) : le verdict ne vaut que pour les "
         "exportateurs, interfaces, sampling-rates et versions ElastiFlow listés dans les "
@@ -312,6 +483,7 @@ def construire_document(analyses: Sequence[Analyse], non_lus: Sequence[str]) -> 
     lignes += ["## 10. Conclusion et décision", ""]
     lignes += ["**Synthèse des résultats**", ""]
     lignes += _conclusion(analyses)
+    lignes += ["", *_synthese_stabilite(analyses)]
     lignes.append("")
     lignes.append("**Verdict** : à compléter et signer (VAL-ELASTIFLOW-001, section 10).")
     texte = "\n".join(lignes)
@@ -319,14 +491,24 @@ def construire_document(analyses: Sequence[Analyse], non_lus: Sequence[str]) -> 
     return texte
 
 
-def rapport(resultats: Path, lectures: Path, sortie: Path) -> int:
+def rapport(
+    resultats: Path,
+    lectures: Path,
+    sortie: Path,
+    points: dict[str, str] | None = None,
+    series: Path | None = None,
+    bord_s: int = BORD_S,
+    cv: float = 0.0,
+) -> int:
     """Analyse les mesures et écrit le document de validation.
 
     Returns:
         Nombre d'analyses produites.
     """
     logger.debug("rapport : entrée | {} + {} -> {}", resultats, lectures, sortie)
-    analyses, non_lus = analyser(resultats, lectures)
+    analyses, non_lus = analyser(resultats, lectures, points)
+    if series is not None:
+        analyses = ajouter_stabilite(analyses, series, bord_s, cv)
     texte = construire_document(analyses, non_lus)
     sortie.write_text(texte, encoding="utf-8")
     logger.info("{} analyse(s), {} test(s) sans lecture -> {}", len(analyses), len(non_lus), sortie)
@@ -432,7 +614,12 @@ def construire_calibration_yaml(
 
 
 def ecrire_calibration(
-    resultats: Path, lectures: Path, chemin: Path, champs: dict[str, str], ingest_lag_minutes: int
+    resultats: Path,
+    lectures: Path,
+    chemin: Path,
+    champs: dict[str, str],
+    ingest_lag_minutes: int,
+    points: dict[str, str] | None = None,
 ) -> int:
     """Écrit le brouillon de calibration ; ``calibrations/<site>.yaml`` (issue #15).
 
@@ -440,7 +627,7 @@ def ecrire_calibration(
         Nombre d'analyses ayant servi à la calibration.
     """
     logger.debug("ecrire_calibration : entrée | {} -> {}", lectures, chemin)
-    analyses, _ = analyser(resultats, lectures)
+    analyses, _ = analyser(resultats, lectures, points)
     if chemin.parent != Path(""):
         chemin.parent.mkdir(parents=True, exist_ok=True)
     chemin.write_text(

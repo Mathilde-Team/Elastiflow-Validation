@@ -15,6 +15,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 | Plan de tests (phase 0, séries A à E, QoS, G1 à G6) : disponible | `efv plan` | #3 |
 | Injection iperf2 et relevé nft vers `resultats.csv` : disponible | `efv injecter` | #4 |
 | Lecture ElastiFlow (Elasticsearch / OpenSearch) vers `lectures.csv` : disponible | `efv lire` | #5 |
+| Constance du débit : série par minute et verdict de stabilité | `efv lire --series --stabilite` | #31 |
 | Comparaison, verdict et document de validation rempli : disponible | `efv rapport` | #6 |
 
 ## Installation et usage
@@ -42,7 +43,14 @@ moyen de A2/A3/A5, comparaison avant/après correction du sampling) :
 ```bash
 uv run efv rapport                       # resultats.csv + lectures.csv -> rapport-validation.md
 uv run efv rapport --sortie val-001.md   # sections 7, 8 et 10 remplies, verdict à signer
+uv run efv rapport --point-mesure sw-a=12 --point-mesure sw-b=7
 ```
+
+En cas de double échantillonnage, le rapport exige un `--point-mesure EXPORTATEUR=IFINDEX`
+par exportateur concerné. `efv lire` doit avoir été relancé avec le champ `echantillonneur`
+relevé en P4 : la colonne JSON `volumes_echantillonneurs` contient les octets, paquets et
+enregistrements de chaque point. Le même choix s'applique à la calibration ; aucun total
+n'est divisé arbitrairement par deux. Les anciens CSV sans double comptage restent lisibles.
 
 Avec `--calibration calibrations/<site>.yaml`, le rapport produit aussi le **fichier de calibration
 consommé par qos-audit** (`docs/CALIBRATION.md` de ce dépôt voisin) : noms de champs P4, facteur
@@ -81,6 +89,10 @@ nft `counter` par port source, un iperf2 par port (`-B CLIENT:PORT`), les tests 
 lancés ensemble, relevé des compteurs 2 s après la fin, une ligne par test ajoutée à `resultats.csv`, pause de
 5 min entre deux lancements. Les changements de sampling de l'exporteur et les préalables (`tc … netem`) sont
 annoncés et attendent la confirmation de l'opérateur ; les tests de laboratoire demandent `--lab`.
+G2 (ICMP, `ping`) et G5 (fragmentation, UDP de 3028 o) sont injectés eux aussi ; marqués `cle: ip` dans le
+plan, ils laissent `ports` et `port_destination` vides dans `resultats.csv` et `efv lire` les lit par IP et
+protocole (§7.11).
+
 Sans iperf2, `--outil iperf3` (§7.12) génère les commandes iperf3 (`--cport`, `-b 0` en UDP sans débit,
 `--pacing-timer 100`, rapport JSON) et donne à chaque processus simultané son serveur (`50001`, `50002`…,
 liste à lancer affichée) ; `port_destination` est alors une plage pour les tests à plusieurs processus.
@@ -117,12 +129,41 @@ uv run efv lire --resultats resultats.csv --sortie lectures.csv --index 'elastif
 
 URL et identifiants sont lus dans l'environnement (`EFV_ES_CA` pour l'autorité du cluster) et jamais affichés.
 
+**Constance du débit** (#31, §9.3 et §10.1) : `--series series.csv` écrit la série par minute utile de chaque
+test et exportateur (échantillons = enregistrements de la minute, octets, paquets, écart à la moyenne, borne
+`196 ÷ √n_minute`, `hors_borne` oui / non / vide) ; `--stabilite stabilite.csv` écrit le verdict par série
+(`stable` oui / non et motif). Une série est refusée s'il manque une minute, si une minute dépasse la borne
+élargie des pics (`max(1,5 ; z ÷ 1,96)` fois la borne, `z = Φ⁻¹(1 − 0,01 ÷ 2m)`, 1,82 pour 28 minutes) ou si
+plus de minutes sortent de leur borne que le hasard ne l'explique (loi binomiale, 4 % de risque : 4 tolérées
+sur 28). Refus à tort d'une série stable simulée : 1,2 à 2,6 %. `--cv` élargit la borne pour des tailles de
+paquets dispersées (`196 × √((1 + CV²) ÷ n)`).
+
+```bash
+uv run efv lire --resultats resultats.csv --sortie lectures.csv --series series.csv --stabilite stabilite.csv
+uv run efv rapport --series series.csv --point-mesure sw-a=12
+```
+
+`efv rapport --series` recalcule la stabilité des séries A et C2 depuis les minutes brutes,
+jointes par test, répétition, exportateur et échantillonneur. Une minute absente est un trou,
+pas une minute à ignorer. Le champ `echantillonneur` des séries et verdicts est vide pour
+le total exportateur ; les lectures configurées en P4 ajoutent une série par point.
+Les anciens CSV de séries restent utilisables pour le total, jamais pour un point choisi.
+Sans `--series`, le rapport indique « non évalué » : un volume conforme ne prouve pas
+un débit constant. Fournir le même `--bord` et le même `--cv` qu'à la lecture.
+Le complément par compteurs d'interface à 30 s reste à relever sur l'infrastructure P4/G6.
+
 ## Développement
 
 ```bash
 make lint   # ruff check + ruff format --check
 make test   # pytest, couverture 95 % minimum (branches comprises)
 ```
+
+Les deux jobs requis pour livrer (`Qualité (lint, tests)` et la garde `dev` → `main`)
+utilisent GitHub `ubuntu-latest` par défaut, pour ne pas dépendre de la disponibilité
+des runners maison (#50). La variable existante `RUNS_ON_LINUX` garde priorité :
+`"ubuntu-latest"` ou `{"group":"maison","labels":["self-hosted","linux"]}` au format JSON.
+Ce choix ne change aucun test, seuil ou contrôle de protection.
 
 ## Socle qualité Mathilde-Team
 

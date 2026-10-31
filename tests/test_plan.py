@@ -101,7 +101,7 @@ def test_format_debit(bps, texte):
         ("version: 2\ntests: []", "version: 1"),
         ("version: 1\ntests: [{}]", "id"),
         ("version: 1\ntests: [{id: X, inconnu: 1}]", "champs inconnus"),
-        ("version: 1\ntests: [{id: X, protocole: icmp}]", "protocole"),
+        ("version: 1\ntests: [{id: X, protocole: sctp}]", "protocole"),
         ("version: 1\ntests: [{id: X, protocole: udp}]", "débit manquant"),
         (
             "version: 1\ntests: [{id: X, protocole: udp, debit: vite, taille: 500, duree: 1}]",
@@ -212,7 +212,7 @@ def test_cli_plan_table(capsys):
     )
     assert "| E1 | 1 | E |  | udp | 15M | 1472 | 0x00 | 60s |" in sortie
     assert "| 1:8 |  | lab |" in sortie
-    assert "Tests manuels (hors iperf) : Q6, G1, G2, G3, G4, G5, G6" in sortie
+    assert "Tests manuels (hors iperf) : Q6, G1, G3, G4, G6" in sortie
     assert "préciser --cir" in sortie
 
 
@@ -353,9 +353,9 @@ def test_serie_r_recette(defaut):
     assert t["R5"].attendu == (("exit_balance", "WARN"),) and t["R5"].lab
     assert t["R6"].attendu == (("sampling_adequacy", "CRIT"),) and t["R6"].sampling == 4096
     assert all(x.attendu == () for x in defaut if x.serie != "R")
-    # en fin de plan (avant la série S, ajoutée après) : les ports des autres séries ne bougent pas
+    # en fin de plan (G5 et série S ajoutées après R) : les ports des autres séries ne bougent pas
     assert min(p for x in recette for p in x.ports) > max(
-        p for x in defaut if x.serie not in {"R", "S"} for p in x.ports
+        p for x in defaut if x.serie not in {"R", "G", "S"} for p in x.ports
     )
 
 

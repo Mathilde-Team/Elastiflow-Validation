@@ -458,6 +458,21 @@ Retirer ensuite la règle : `tc qdisc del dev eth0 root`. `netem` s'applique à 
 | Fragmentation | UDP avec `-l 3000` | Les fragments suivants n'ont pas d'en-tête L4 : **pas de ports** dans ElastiFlow. |
 | Compteurs d'interface | `display counters rate inbound interface ...` | Débit calculé par ElastiFlow depuis les compteurs vs débit du switch (visible grâce au `counter interval 30`). |
 
+**Outillage (#33).** G2 et G5 sont dans le plan et passent par `efv injecter` et `efv lire` ; les autres restent
+des gestes de l'opérateur, notés dans la fiche VAL :
+
+| Test | Outillage | Vérité terrain et lecture |
+|---|---|---|
+| G1 VLAN | manuel : changer la topologie du banc (deux VLAN, routage) n'est pas un geste scriptable depuis le client | mêmes commandes iperf, VLAN et interfaces lus dans Kibana |
+| G2 ICMP | `protocole: icmp` : `ping -c N -i 0.2 -s TAILLE−28 -t 64 -Q TOS -I CLIENT SERVEUR`, 300 s à 1:8 ; ne consomme pas de port source | règle nft `icmp type echo-request counter` ; lecture par IP et protocole (colonnes `ports` et `port_destination` vides) |
+| G3 flags TCP | manuel : hping3 ou nping ne sont pas sur le banc de référence, et les flags ne sont pas encore lus (champ à relever en P1) | nombre de connexions noté à la main |
+| G4 IPv6 | manuel : le banc n'a pas d'adressage IPv6 de référence ; rejouer un test A avec `--serveur`/`--client` IPv6 quand il existe | idem série A |
+| G5 fragmentation | test UDP de 3028 o (`-l 3000`), `cle: ip`, 300 s à 1:8, en fin de plan pour ne pas décaler les ports | nft compte le datagramme avant fragmentation (3028 o) ; le lien porte 2 fragments (1500 + 1548 = 3048 o) dont le second sans ports : lecture par IP et protocole, attendu paquets ≈ 2 × nft, octets ≈ nft + 20 o par datagramme |
+| G6 compteurs | manuel : relevé `display counters rate` sur le switch, comparé à l'index des counter samples | saisie à la main dans la fiche |
+
+Une lecture sans ports compte tout le trafic du protocole entre le client et le serveur pendant la fenêtre : ne
+rien lancer d'autre entre les deux pendant G2 et G5 (la pause de 5 min entre tests y suffit).
+
 ### 7.12 Variante iperf3
 
 > À utiliser seulement si iperf2 n'est pas disponible (Rocky 9 : iperf3 dans les dépôts de base, iperf2
@@ -691,7 +706,9 @@ Un point de vigilance de fond : ElastiFlow **reconstruit des flux à partir d'é
 | Octets / paquets | `network.bytes`, `network.packets` | |
 | Date | `@timestamp` | début et fin du flux dans les champs `event.*` ou `flow.*` |
 | Exportateur (le switch) | | champ `flow.export.*` |
-| Sampling-rate appliqué | | champ `flow.sampling_interval` ou équivalent |
+| Sampling-rate appliqué | | `flow.sampling_interval` — nom établi (documentation ElastiFlow,
+  github.com/robcowart/elastiflow#116 ; aligné dans qos-audit, issue #16 et PR #84) ; à confirmer
+  en P4 sur le mapping réel de l'instance, avec sa version d'ElastiFlow |
 | Interfaces d'entrée / sortie | | champs `flow.input.*` et `flow.output.*` |
 | DSCP / TOS | | champs `flow.ip.dscp*` ou équivalent |
 | Flags TCP, VLAN | | champs `flow.tcp.*`, `flow.vlan.*` ou équivalent |
@@ -710,7 +727,7 @@ Les noms ECS sont standards. **Les noms spécifiques ElastiFlow dépendent de la
 3. **Contrôle des métadonnées.** Vérifier sur un enregistrement : exportateur, interface d'entrée, **sampling-rate attendu** (celui de l'interface), DSCP émis. Un sampling-rate incorrect fausse tous les volumes d'un facteur constant.
 4. **Somme.** Somme de `network.bytes` et de `network.packets` sur la fenêtre utile (on exclut la première et la dernière minute, montée en charge et fin de flux).
 5. **Débit.** `octets × 8 ÷ durée` (en excluant les minutes de bord).
-6. **Constance du débit.** Histogramme par minute de la somme des octets : le débit doit être stable. Attention : le nombre d'échantillons **par minute** est bien plus faible que sur 30 min, donc la dispersion par minute est naturellement plus grande (de l'ordre de `196 ÷ √n_minute`). Juger la constance sur des fenêtres de 5 min plutôt que d'une minute.
+6. **Constance du débit.** Histogramme par minute de la somme des octets : le débit doit être stable. Attention : le nombre d'échantillons **par minute** est bien plus faible que sur 30 min, donc la dispersion par minute est naturellement plus grande (de l'ordre de `196 ÷ √n_minute`). Le critère de 10.1 en tient compte : chaque minute est jugée contre sa propre borne `196 ÷ √n_minute`, avec une tolérance au hasard calculée sur le nombre de minutes (`efv lire --series --stabilite`, #31).
 7. **Comparaison.** Estimation ElastiFlow contre référence (octets nft, avec la correction de base établie en phase 0), puis calcul de l'erreur.
 8. **Cas multi-points.** Reprendre 1 à 7 pour chaque exportateur (A et B), puis comparer A et B.
 
@@ -725,9 +742,19 @@ qui l'a prélevé (sFlow `source_id_index`) ou la comparaison à nft (volume ≈
 écrit les octets par couple d'interfaces (`interfaces`) et, si le champ `echantillonneur` est relevé en P4 et
 déclaré dans `--champs`, la liste des échantillonneurs et `double_echantillonnage = oui` quand il y en a
 plusieurs pour un exportateur (#30, qos-audit#26). Pour l'erreur de volume, ne retenir qu'un échantillonneur
-par exportateur : celui du point de mesure.
+par exportateur : celui du point de mesure. `efv lire` conserve ses octets, paquets et
+enregistrements dans `volumes_echantillonneurs` (JSON). `efv rapport --point-mesure sw-a=12`
+retient uniquement l'échantillonneur 12 de sw-a, y compris pour `--calibration` ;
+sans choix explicite, un double échantillonnage signalé bloque le rapport. Les anciens
+CSV ambigus doivent être relus, jamais corrigés en divisant le total par deux.
 
 ### 9.4 Quoi lire pour chaque objectif
+
+`efv rapport --series series.csv` recalcule le verdict de constance pour A et C2,
+séparément du volume. La jointure inclut l'échantillonneur choisi par `--point-mesure` :
+le total de deux points ne peut pas prouver la stabilité d'un seul point. Les minutes
+absentes sont rendues avec zéro échantillon ; sans fichier, le critère reste non évalué.
+Conserver les mêmes options `--bord` et `--cv` entre lecture et rapport.
 
 | Objectif | Lecture dans ElastiFlow |
 |---|---|
@@ -763,8 +790,9 @@ par exportateur : celui du point de mesure.
 
 | Critère | Seuil |
 |---|---|
-| Erreur de volume (tests A2 à A6, B, C) | Dans la borne à 95 % de `196 ÷ √n`, avec n le nombre d'échantillons du test. |
+| Erreur de volume (tests A2 à A6, B, C) | **Toutes** les mesures dans la borne globale à 95 % `z ÷ √n` (Bonferroni, §10.3 : z ≈ 305 pour 22 mesures), avec n le nombre d'échantillons du test. |
 | Plancher (A2) | Erreur ≤ 5 % avec le sampling du tableau 4.2. |
+| Débit constant (A, C2) | Sur la fenêtre utile (hors minutes de bord), chaque minute a au moins un échantillon ; son écart à la moyenne des minutes reste sous `f × 196 ÷ √n_minute` avec `f = max(1,5 ; Φ⁻¹(1 − 0,01 ÷ 2m) ÷ 1,96)` (1,82 pour m = 28 minutes) ; au plus k minutes dépassent `196 ÷ √n_minute`, k plus petit entier tel que P(X > k) ≤ 4 % pour X binomiale (m ; 0,05) (k = 4 pour 28 minutes). Risque total de refuser à tort une série stable : ≤ 5 % (1,2 à 2,6 % mesurés en simulation). |
 | Absence de biais | Sur 3 répétitions, la moyenne des erreurs est proche de 0 (un biais constant révèle un facteur d'échantillonnage ou une base de taille erronée). |
 | Détection au plancher (A1) | Fréquence de détection cohérente avec `1 − exp(−n attendu)`. |
 | Marquage (Q1) | 100 % des DSCP émis retrouvés au point A ; au point B, écarts expliqués par la politique de l'opérateur. |
@@ -785,17 +813,25 @@ par exportateur : celui du point de mesure.
 | ElastiFlow : somme paquets / octets | |
 | Échantillons attendus `n` | |
 | **Erreur observée** (ElastiFlow − référence) ÷ référence | |
-| Borne théorique à 95 % | |
+| Borne globale à 95 % (Bonferroni, §10.3) | |
 | Conforme (oui / non) | |
 
 ### 10.3 Calcul de l'erreur
 
 ```
 n_attendu     = paquets_réels / sampling_rate
-borne_95 (%)  = 196 / sqrt(n_attendu)
+m             = nombre de mesures jugées ensemble (erreur et n calculables)
+z             = 100 × Φ⁻¹(1 − 0,05 / (2m))          # Bonferroni : ≈ 305 pour m = 22, 196 pour m = 1
+borne (%)     = z / sqrt(n_attendu)
 erreur (%)    = (octets_elastiflow - octets_référence) / octets_référence × 100
-conforme      = |erreur| <= borne_95
+conforme      = |erreur| <= borne
+critère rempli = toutes les mesures conformes
 ```
+
+Pourquoi Bonferroni (#9) : avec une borne individuelle à 95 % (`196 / √n`) et 22 mesures, un ElastiFlow juste sort au
+moins une fois de la borne par hasard dans 1 − 0,95²² ≈ 68 % des cas. La correction de Bonferroni ramène ce risque
+global d'échec à tort à 5 % au plus. Le seuil z est recalculé automatiquement si le nombre de mesures change
+(sous-ensemble minimal, répétitions) : `efv rapport` l'indique dans la conclusion.
 
 ### 10.4 Périmètre de validité et revalidation
 

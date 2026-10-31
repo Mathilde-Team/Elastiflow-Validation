@@ -6,6 +6,7 @@ Outil de contre-expertise d'**ElastiFlow** : on envoie un trafic connu (iperf2) 
 
 - [Protocole de test](docs/protocole-validation-elastiflow-sflow.md) : théorie de l'échantillonnage, sampling-rate par débit de lien, injection, QoS opérateur, lecture dans ElastiFlow.
 - [Document de validation VAL-ELASTIFLOW-001](docs/VAL-ELASTIFLOW-001.md) : critères d'acceptation, fiches de test, verdict.
+- [Gabarits de relevé P4/G6](docs/releves-p4-g6/Releve-P4-G6-Elastiflow.md) : fiche opérateur, mapping réel, CSV de mesures matérielles et plan de trafic de support. Aucun résultat prérempli ; changements réseau et injection à autoriser avant exécution.
 
 ## Chaîne visée
 

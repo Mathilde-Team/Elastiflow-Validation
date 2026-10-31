@@ -140,7 +140,17 @@ paquets dispersées (`196 × √((1 + CV²) ÷ n)`).
 
 ```bash
 uv run efv lire --resultats resultats.csv --sortie lectures.csv --series series.csv --stabilite stabilite.csv
+uv run efv rapport --series series.csv --point-mesure sw-a=12
 ```
+
+`efv rapport --series` recalcule la stabilité des séries A et C2 depuis les minutes brutes,
+jointes par test, répétition, exportateur et échantillonneur. Une minute absente est un trou,
+pas une minute à ignorer. Le champ `echantillonneur` des séries et verdicts est vide pour
+le total exportateur ; les lectures configurées en P4 ajoutent une série par point.
+Les anciens CSV de séries restent utilisables pour le total, jamais pour un point choisi.
+Sans `--series`, le rapport indique « non évalué » : un volume conforme ne prouve pas
+un débit constant. Fournir le même `--bord` et le même `--cv` qu'à la lecture.
+Le complément par compteurs d'interface à 30 s reste à relever sur l'infrastructure P4/G6.
 
 ## Développement
 

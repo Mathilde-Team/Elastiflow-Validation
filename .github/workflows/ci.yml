@@ -16,7 +16,8 @@ permissions:
 jobs:
   quality:
     name: Qualité (lint, tests)
-    runs-on: ${{ fromJSON(vars.RUNS_ON_LINUX || '{"group":"maison","labels":["self-hosted","linux"]}') }}
+    # Repli autorisé par MISSION.md : pas de dépendance aux runners maison (#50).
+    runs-on: ${{ fromJSON(vars.RUNS_ON_LINUX || '"ubuntu-latest"') }}
 
     steps:
       - name: Checkout du dépôt

@@ -2,7 +2,7 @@
 # ailleurs (SOCLE.md §4). Versions des outils figées (groupe dev).
 [project]
 name = "elastiflow-validation"
-version = "0.1.0"
+version = "0.1.1"
 description = "Contre-expertise d'ElastiFlow par injection de trafic iperf2 et lecture sFlow"
 readme = "README.md"
 license = "GPL-3.0-or-later"

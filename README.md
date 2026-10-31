@@ -43,7 +43,14 @@ moyen de A2/A3/A5, comparaison avant/après correction du sampling) :
 ```bash
 uv run efv rapport                       # resultats.csv + lectures.csv -> rapport-validation.md
 uv run efv rapport --sortie val-001.md   # sections 7, 8 et 10 remplies, verdict à signer
+uv run efv rapport --point-mesure sw-a=12 --point-mesure sw-b=7
 ```
+
+En cas de double échantillonnage, le rapport exige un `--point-mesure EXPORTATEUR=IFINDEX`
+par exportateur concerné. `efv lire` doit avoir été relancé avec le champ `echantillonneur`
+relevé en P4 : la colonne JSON `volumes_echantillonneurs` contient les octets, paquets et
+enregistrements de chaque point. Le même choix s'applique à la calibration ; aucun total
+n'est divisé arbitrairement par deux. Les anciens CSV sans double comptage restent lisibles.
 
 Avec `--calibration calibrations/<site>.yaml`, le rapport produit aussi le **fichier de calibration
 consommé par qos-audit** (`docs/CALIBRATION.md` de ce dépôt voisin) : noms de champs P4, facteur

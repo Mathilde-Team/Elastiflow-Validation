@@ -742,7 +742,11 @@ qui l'a prélevé (sFlow `source_id_index`) ou la comparaison à nft (volume ≈
 écrit les octets par couple d'interfaces (`interfaces`) et, si le champ `echantillonneur` est relevé en P4 et
 déclaré dans `--champs`, la liste des échantillonneurs et `double_echantillonnage = oui` quand il y en a
 plusieurs pour un exportateur (#30, qos-audit#26). Pour l'erreur de volume, ne retenir qu'un échantillonneur
-par exportateur : celui du point de mesure.
+par exportateur : celui du point de mesure. `efv lire` conserve ses octets, paquets et
+enregistrements dans `volumes_echantillonneurs` (JSON). `efv rapport --point-mesure sw-a=12`
+retient uniquement l'échantillonneur 12 de sw-a, y compris pour `--calibration` ;
+sans choix explicite, un double échantillonnage signalé bloque le rapport. Les anciens
+CSV ambigus doivent être relus, jamais corrigés en divisant le total par deux.
 
 ### 9.4 Quoi lire pour chaque objectif
 

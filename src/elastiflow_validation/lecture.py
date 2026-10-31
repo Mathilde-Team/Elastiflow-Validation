@@ -97,6 +97,7 @@ COLONNES_LECTURE = (
     "interfaces",
     "echantillonneurs",
     "double_echantillonnage",
+    "volumes_echantillonneurs",
 )
 
 
@@ -339,7 +340,8 @@ def requete_test(
         }
     if champs.get("echantillonneur"):
         par_exportateur["echantillonneurs"] = {
-            "terms": {"field": champs["echantillonneur"], "size": 10}
+            "terms": {"field": champs["echantillonneur"], "size": 100, "missing": -1},
+            "aggs": sommes,
         }
     corps = {
         "size": 0,
@@ -393,6 +395,27 @@ def _double(exp: dict) -> str:
     return double
 
 
+def _volumes_echantillonneurs(exp: dict) -> str:
+    """Volumes par point de mesure, sans dédupliquer arbitrairement les totaux."""
+    logger.debug("_volumes_echantillonneurs : entrée")
+    agg = exp.get("echantillonneurs", {})
+    if agg.get("sum_other_doc_count", 0) or agg.get("doc_count_error_upper_bound", 0):
+        logger.debug("_volumes_echantillonneurs : agrégation tronquée")
+        raise ValueError("échantillonneurs tronqués : réduire le périmètre de lecture")
+    volumes = {
+        str(b["key"]): {
+            "octets": round(b["octets"]["value"]),
+            "paquets": round(b["paquets"]["value"]),
+            "enregistrements": b["doc_count"],
+        }
+        for b in agg.get("buckets", [])
+        if "octets" in b and "paquets" in b
+    }
+    texte = json.dumps(volumes, sort_keys=True) if volumes else ""
+    logger.debug("_volumes_echantillonneurs : sortie {} point(s)", len(volumes))
+    return texte
+
+
 def lire_test(
     client: Client,
     index: str,
@@ -430,11 +453,12 @@ def lire_test(
                 _interfaces(exp), _valeurs(exp.get("echantillonneurs", {})), _double(exp),
             ]
         )  # fmt: skip
-        if lignes[-1][-1]:
+        if _double(exp):
             logger.warning(
                 "{}#{} : {} vu par plusieurs échantillonneurs ({}) : double comptage probable",
-                ligne["id"], ligne["repetition"], exp["key"], lignes[-1][-2],
+                ligne["id"], ligne["repetition"], exp["key"], _valeurs(exp["echantillonneurs"]),
             )  # fmt: skip
+        lignes[-1].append(_volumes_echantillonneurs(exp))
         if series is not None:
             serie = stabilite.serie_minutes(minutes, utile_bas, utile_haut)
             series.append((ligne["id"], ligne["repetition"], str(exp["key"]), serie))

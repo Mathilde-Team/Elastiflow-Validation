@@ -21,6 +21,7 @@ sont laissées vides.
 from __future__ import annotations
 
 import csv
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -84,6 +85,7 @@ class Analyse:
     erreur_pct: float | None
     borne_pct: float | None
     conforme: bool | None
+    point_mesure: str = ""
 
     @property
     def cle(self) -> str:
@@ -103,7 +105,51 @@ def _sampling_effectif(resultat: dict[str, str], lecture: dict[str, str]) -> int
     return valeur
 
 
-def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]:
+def points_mesure(choix: Sequence[str]) -> dict[str, str]:
+    """Parse les choix répétés ``EXPORTATEUR=IFINDEX``, sans doublon ambigu."""
+    logger.debug("points_mesure : entrée {} choix", len(choix))
+    points: dict[str, str] = {}
+    for texte in choix:
+        nom, separateur, interface = texte.rpartition("=")
+        if not separateur or not nom.strip() or not interface.isdigit() or nom in points:
+            logger.debug("points_mesure : choix invalide")
+            raise ValueError(
+                "point de mesure attendu : EXPORTATEUR=IFINDEX, unique par exportateur"
+            )
+        points[nom] = interface
+    logger.debug("points_mesure : sortie {} choix", len(points))
+    return points
+
+
+def _selectionner(lecture: dict[str, str], points: dict[str, str]) -> tuple[dict[str, str], str]:
+    """Retient le volume du point demandé ; refuse un double comptage non résolu."""
+    logger.debug("_selectionner : entrée")
+    point = points.get(lecture["exportateur"], "")
+    echantillonneurs = set(filter(None, lecture.get("echantillonneurs", "").split(";")))
+    double = lecture.get("double_echantillonnage") == "oui" or len(echantillonneurs) > 1
+    if double and not point:
+        logger.debug("_selectionner : double comptage non résolu")
+        raise ValueError(f"{lecture['exportateur']} : choisir --point-mesure EXPORTATEUR=IFINDEX")
+    if point:
+        volumes = json.loads(lecture.get("volumes_echantillonneurs") or "{}")
+        if not isinstance(volumes, dict) or point not in volumes:
+            logger.debug("_selectionner : volume du point absent")
+            raise ValueError(f"{lecture['exportateur']} : point {point} absent ; relancer efv lire")
+        volume = volumes[point]
+        if not isinstance(volume, dict) or any(
+            not isinstance(volume.get(c), int) or isinstance(volume.get(c), bool) or volume[c] < 0
+            for c in ("octets", "paquets", "enregistrements")
+        ):
+            logger.debug("_selectionner : volume invalide")
+            raise ValueError("volumes_echantillonneurs : entiers positifs ou nuls attendus")
+        lecture = lecture | {c: str(v) for c, v in volume.items()}
+    logger.debug("_selectionner : sortie point {}", point or "total")
+    return lecture, point
+
+
+def analyser(
+    resultats: Path, lectures: Path, points: dict[str, str] | None = None
+) -> tuple[list[Analyse], list[str]]:
     """Joint ``resultats.csv`` et ``lectures.csv`` et calcule chaque mesure.
 
     Returns:
@@ -123,6 +169,7 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
         if reference is None:
             logger.warning("lecture sans résultat injecté : {}#{}", cle[0], cle[1])
             continue
+        lecture, point = _selectionner(lecture, points or {})
         vus.add(cle)
         octets_reference = int(reference["octets"] or 0)
         paquets_reference = int(reference["paquets"] or 0)
@@ -156,6 +203,7 @@ def analyser(resultats: Path, lectures: Path) -> tuple[list[Analyse], list[str]]
                 erreur_pct=erreur,
                 borne_pct=None,
                 conforme=None,
+                point_mesure=point,
             )
         )
     analyses = bornes_bonferroni(analyses)
@@ -238,6 +286,7 @@ def _fiche(a: Analyse) -> list[str]:
         f"| Début / fin (epoch) | {a.debut} / {a.fin} |",
         f"| Référence : paquets / octets IP (nft) | {a.paquets_reference} / {a.octets_reference} |",
         f"| ElastiFlow : exportateur, sampling-rate lu | {a.exportateur}, {a.sampling_lu} |",
+        f"| Point de mesure (ifindex échantillonneur) | {a.point_mesure or 'total exportateur'} |",
         f"| ElastiFlow : enregistrements, paquets, octets | {a.enregistrements}, "
         f"{a.paquets_elastiflow}, {a.octets_elastiflow} |",
         f"| Échantillons attendus n | {a.n_attendu:.0f} |",
@@ -356,14 +405,16 @@ def construire_document(analyses: Sequence[Analyse], non_lus: Sequence[str]) -> 
     return texte
 
 
-def rapport(resultats: Path, lectures: Path, sortie: Path) -> int:
+def rapport(
+    resultats: Path, lectures: Path, sortie: Path, points: dict[str, str] | None = None
+) -> int:
     """Analyse les mesures et écrit le document de validation.
 
     Returns:
         Nombre d'analyses produites.
     """
     logger.debug("rapport : entrée | {} + {} -> {}", resultats, lectures, sortie)
-    analyses, non_lus = analyser(resultats, lectures)
+    analyses, non_lus = analyser(resultats, lectures, points)
     texte = construire_document(analyses, non_lus)
     sortie.write_text(texte, encoding="utf-8")
     logger.info("{} analyse(s), {} test(s) sans lecture -> {}", len(analyses), len(non_lus), sortie)
@@ -469,7 +520,12 @@ def construire_calibration_yaml(
 
 
 def ecrire_calibration(
-    resultats: Path, lectures: Path, chemin: Path, champs: dict[str, str], ingest_lag_minutes: int
+    resultats: Path,
+    lectures: Path,
+    chemin: Path,
+    champs: dict[str, str],
+    ingest_lag_minutes: int,
+    points: dict[str, str] | None = None,
 ) -> int:
     """Écrit le brouillon de calibration ; ``calibrations/<site>.yaml`` (issue #15).
 
@@ -477,7 +533,7 @@ def ecrire_calibration(
         Nombre d'analyses ayant servi à la calibration.
     """
     logger.debug("ecrire_calibration : entrée | {} -> {}", lectures, chemin)
-    analyses, _ = analyser(resultats, lectures)
+    analyses, _ = analyser(resultats, lectures, points)
     if chemin.parent != Path(""):
         chemin.parent.mkdir(parents=True, exist_ok=True)
     chemin.write_text(

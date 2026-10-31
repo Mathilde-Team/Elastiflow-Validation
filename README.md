@@ -149,6 +149,12 @@ make lint   # ruff check + ruff format --check
 make test   # pytest, couverture 95 % minimum (branches comprises)
 ```
 
+Les deux jobs requis pour livrer (`Qualité (lint, tests)` et la garde `dev` → `main`)
+utilisent GitHub `ubuntu-latest` par défaut, pour ne pas dépendre de la disponibilité
+des runners maison (#50). La variable existante `RUNS_ON_LINUX` garde priorité :
+`"ubuntu-latest"` ou `{"group":"maison","labels":["self-hosted","linux"]}` au format JSON.
+Ce choix ne change aucun test, seuil ou contrôle de protection.
+
 ## Socle qualité Mathilde-Team
 
 Ce dépôt est créé depuis [`modele-depot`](https://github.com/Mathilde-Team/modele-depot). Il suit le [socle qualité de l'équipe](https://github.com/Mathilde-Team/.github/blob/main/SOCLE.md) :

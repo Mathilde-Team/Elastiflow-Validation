@@ -118,3 +118,12 @@ def test_points_invalides(choix):
 def test_points_valides():
     assert rapport.points_mesure([]) == {}
     assert rapport.points_mesure(["sw-a=12", "sw-b=3"]) == {"sw-a": "12", "sw-b": "3"}
+
+
+def test_volume_ne_remplace_pas_les_identifiants():
+    volume = {"octets": 1, "paquets": 1, "enregistrements": 1, "id": "C2", "exportateur": "sw-b"}
+    ligne, _ = rapport._selectionner(
+        {"id": "A3", "exportateur": "sw-a", "volumes_echantillonneurs": json.dumps({"12": volume})},
+        {"sw-a": "12"},
+    )
+    assert ligne["id"] == "A3" and ligne["exportateur"] == "sw-a"

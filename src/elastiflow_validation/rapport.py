@@ -146,7 +146,7 @@ def _selectionner(lecture: dict[str, str], points: dict[str, str]) -> tuple[dict
         ):
             logger.debug("_selectionner : volume invalide")
             raise ValueError("volumes_echantillonneurs : entiers positifs ou nuls attendus")
-        lecture = lecture | {c: str(v) for c, v in volume.items()}
+        lecture = lecture | {c: str(volume[c]) for c in ("octets", "paquets", "enregistrements")}
     logger.debug("_selectionner : sortie point {}", point or "total")
     return lecture, point
 

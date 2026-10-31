@@ -69,6 +69,7 @@ COLONNES_SERIE = (
     "ecart_pct",
     "borne_pct",
     "hors_borne",
+    "echantillonneur",
 )
 COLONNES_VERDICT = (
     "id",
@@ -81,6 +82,7 @@ COLONNES_VERDICT = (
     "pics",
     "stable",
     "motif",
+    "echantillonneur",
 )
 
 
@@ -92,6 +94,9 @@ class Minute:
     echantillons: int
     octets: float
     paquets: float
+
+
+Serie = tuple[str, str, str, Sequence[Minute]] | tuple[str, str, str, Sequence[Minute], str]
 
 
 @dataclass(frozen=True)
@@ -204,15 +209,15 @@ def _pct(valeur: float) -> str:
     return texte
 
 
-def ecrire_series(
-    chemin: Path, series: Sequence[tuple[str, str, str, Sequence[Minute]]], cv: float = 0.0
-) -> None:
+def ecrire_series(chemin: Path, series: Sequence[Serie], cv: float = 0.0) -> None:
     """Écrit une ligne par minute utile : ``(id, répétition, exportateur, série)`` par test."""
     logger.debug("ecrire_series : entrée {} série(s) -> {}", len(series), chemin)
     with chemin.open("w", encoding="utf-8", newline="") as f:
         ecrivain = csv.writer(f, lineterminator="\n")
         ecrivain.writerow(COLONNES_SERIE)
-        for ident, repetition, exportateur, serie in series:
+        for entree in series:
+            ident, repetition, exportateur, serie = entree[:4]
+            point = entree[4] if len(entree) == 5 else ""
             v = juger(serie, cv)
             for i, x in enumerate(serie):
                 ecart = _pct(v.ecarts[i]) if v.ecarts else ""
@@ -223,26 +228,26 @@ def ecrire_series(
                     hors = "oui" if v.ecarts and abs(v.ecarts[i]) > v.bornes[i] else "non"
                 ecrivain.writerow(
                     [ident, repetition, exportateur, x.debut, x.echantillons,
-                     round(x.octets), round(x.paquets), ecart, borne, hors]
+                     round(x.octets), round(x.paquets), ecart, borne, hors, point]
                 )  # fmt: skip
     logger.debug("ecrire_series : sortie")
 
 
-def ecrire_verdicts(
-    chemin: Path, series: Sequence[tuple[str, str, str, Sequence[Minute]]], cv: float = 0.0
-) -> int:
+def ecrire_verdicts(chemin: Path, series: Sequence[Serie], cv: float = 0.0) -> int:
     """Écrit le verdict de constance de chaque série ; renvoie le nombre de séries non stables."""
     logger.debug("ecrire_verdicts : entrée {} série(s) -> {}", len(series), chemin)
     instables = 0
     with chemin.open("w", encoding="utf-8", newline="") as f:
         ecrivain = csv.writer(f, lineterminator="\n")
         ecrivain.writerow(COLONNES_VERDICT)
-        for ident, repetition, exportateur, serie in series:
+        for entree in series:
+            ident, repetition, exportateur, serie = entree[:4]
+            point = entree[4] if len(entree) == 5 else ""
             v = juger(serie, cv)
             instables += not v.stable
             ecrivain.writerow(
                 [ident, repetition, exportateur, v.minutes, v.minutes_vides, v.depassements,
-                 v.toleres, v.pics, "oui" if v.stable else "non", v.motif]
+                 v.toleres, v.pics, "oui" if v.stable else "non", v.motif, point]
             )  # fmt: skip
     logger.debug("ecrire_verdicts : sortie {} instable(s)", instables)
     return instables

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -30,7 +31,9 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
+from elastiflow_validation import stabilite
 from elastiflow_validation.calcul import z_bonferroni
+from elastiflow_validation.lecture import BORD_S, fenetre_utile
 
 __all__ = [
     "Analyse",
@@ -86,6 +89,7 @@ class Analyse:
     borne_pct: float | None
     conforme: bool | None
     point_mesure: str = ""
+    stabilite: stabilite.Verdict | None = None
 
     @property
     def cle(self) -> str:
@@ -236,6 +240,86 @@ def bornes_bonferroni(analyses: Sequence[Analyse]) -> list[Analyse]:
     return resultat
 
 
+def ajouter_stabilite(
+    analyses: Sequence[Analyse], series: Path, bord_s: int = BORD_S, cv: float = 0.0
+) -> list[Analyse]:
+    """Recalcule la stabilité depuis les minutes brutes, sans croire les verdicts du CSV."""
+    logger.debug("ajouter_stabilite : entrée {} analyse(s)", len(analyses))
+    if bord_s < 0 or not math.isfinite(cv) or cv < 0:
+        logger.debug("ajouter_stabilite : paramètres invalides")
+        raise ValueError("bord et CV doivent être positifs ou nuls et finis")
+    groupes: dict[tuple[str, str, str, str], dict[int, stabilite.Minute]] = {}
+    with series.open(encoding="utf-8", newline="") as fichier:
+        lecteur = csv.DictReader(fichier)
+        requis = {"id", "repetition", "exportateur", "minute", "echantillons", "octets", "paquets"}
+        if not requis <= set(lecteur.fieldnames or []):
+            logger.debug("ajouter_stabilite : colonnes absentes")
+            raise ValueError("series.csv : colonnes requises absentes")
+        for ligne in lecteur:
+            cle = (
+                ligne["id"],
+                ligne["repetition"],
+                ligne["exportateur"],
+                ligne.get("echantillonneur") or "",
+            )
+            minute = stabilite.Minute(
+                int(ligne["minute"]),
+                int(ligne["echantillons"]),
+                float(ligne["octets"]),
+                float(ligne["paquets"]),
+            )
+            groupe = groupes.setdefault(cle, {})
+            if (
+                minute.debut % 60
+                or minute.debut in groupe
+                or minute.echantillons < 0
+                or any(not math.isfinite(v) or v < 0 for v in (minute.octets, minute.paquets))
+            ):
+                logger.debug("ajouter_stabilite : minute invalide ou dupliquée")
+                raise ValueError("series.csv : minute invalide ou dupliquée")
+            groupe[minute.debut] = minute
+    resultat = []
+    for a in analyses:
+        if a.id.startswith("A") or a.id.removesuffix("-4096") == "C2":
+            groupe = groupes.get((a.id, a.repetition, a.exportateur, a.point_mesure), {})
+            bas, haut = fenetre_utile(a.debut, a.fin, bord_s)
+            minutes = [
+                groupe.get(m, stabilite.Minute(m, 0, 0.0, 0.0)) for m in range(bas, haut, 60)
+            ]
+            a = replace(a, stabilite=stabilite.juger(minutes, cv))
+        resultat.append(a)
+    logger.debug("ajouter_stabilite : sortie {} analyse(s)", len(resultat))
+    return resultat
+
+
+def _synthese_stabilite(analyses: Sequence[Analyse]) -> list[str]:
+    """Sépare le critère de volume du critère temporel (A et C2)."""
+    logger.debug("_synthese_stabilite : entrée")
+    lignes = [
+        "### Constance du débit (A, C2)",
+        "",
+        "| Test | Exportateur | Point | Stable | Minutes vides | Pics | Motif |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for a in analyses:
+        if not (a.id.startswith("A") or a.id.removesuffix("-4096") == "C2"):
+            continue
+        v = a.stabilite
+        if v is None:
+            lignes.append(
+                f"| {a.cle} | {a.exportateur} | {a.point_mesure} | non évalué | | | "
+                "fournir --series ; un volume conforme ne prouve pas la stabilité |"
+            )
+        else:
+            lignes.append(
+                f"| {a.cle} | {a.exportateur} | {a.point_mesure} | "
+                f"{'oui' if v.stable else 'non'} | {v.minutes_vides} | {v.pics} | {v.motif} |"
+            )
+    lignes.append("")
+    logger.debug("_synthese_stabilite : sortie")
+    return lignes
+
+
 def biais_moyen(analyses: Sequence[Analyse]) -> float | None:
     """Moyenne des erreurs des répétitions de A2, A3 et A5 (VAL §8), ou ``None`` si aucune."""
     logger.debug("biais_moyen : entrée | {} analyse(s)", len(analyses))
@@ -338,7 +422,8 @@ def _conclusion(analyses: Sequence[Analyse]) -> list[str]:
         conformes = sum(1 for a in jugees if a.conforme)
         z = f"{z_bonferroni(len(jugees)) / 100:.2f}".replace(".", ",")
         lignes.append(
-            f"**Critère global** (protocole §10.3, Bonferroni sur m = {len(jugees)} mesures, "
+            "**Critère global de volume** (protocole §10.3, "
+            f"Bonferroni sur m = {len(jugees)} mesures, "
             f"z = {z}) : "
             f"{conformes} / {len(jugees)} mesures dans leur borne ; "
             + (
@@ -398,6 +483,7 @@ def construire_document(analyses: Sequence[Analyse], non_lus: Sequence[str]) -> 
     lignes += ["## 10. Conclusion et décision", ""]
     lignes += ["**Synthèse des résultats**", ""]
     lignes += _conclusion(analyses)
+    lignes += ["", *_synthese_stabilite(analyses)]
     lignes.append("")
     lignes.append("**Verdict** : à compléter et signer (VAL-ELASTIFLOW-001, section 10).")
     texte = "\n".join(lignes)
@@ -406,7 +492,13 @@ def construire_document(analyses: Sequence[Analyse], non_lus: Sequence[str]) -> 
 
 
 def rapport(
-    resultats: Path, lectures: Path, sortie: Path, points: dict[str, str] | None = None
+    resultats: Path,
+    lectures: Path,
+    sortie: Path,
+    points: dict[str, str] | None = None,
+    series: Path | None = None,
+    bord_s: int = BORD_S,
+    cv: float = 0.0,
 ) -> int:
     """Analyse les mesures et écrit le document de validation.
 
@@ -415,6 +507,8 @@ def rapport(
     """
     logger.debug("rapport : entrée | {} + {} -> {}", resultats, lectures, sortie)
     analyses, non_lus = analyser(resultats, lectures, points)
+    if series is not None:
+        analyses = ajouter_stabilite(analyses, series, bord_s, cv)
     texte = construire_document(analyses, non_lus)
     sortie.write_text(texte, encoding="utf-8")
     logger.info("{} analyse(s), {} test(s) sans lecture -> {}", len(analyses), len(non_lus), sortie)

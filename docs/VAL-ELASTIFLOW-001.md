@@ -71,7 +71,7 @@ Le sampling-rate se règle **par interface**. Le débit à retenir est le débit
 | --- | --- |
 | Erreur de volume (séries A, B, C) | Toutes les mesures dans la borne globale à 95 % : z ÷ √n (Bonferroni, z ≈ 305 pour 22 mesures), avec n le nombre d'échantillons du test |
 | Plancher (A2) | Erreur ≤ 5 % avec le sampling recommandé |
-| Débit constant (A, C2) | Aucune minute utile sans échantillon, aucun pic au-delà de 1,82 × 196 ÷ √n_minute (28 minutes), au plus 4 minutes sur 28 hors de 196 ÷ √n_minute (`efv lire --stabilite`) |
+| Débit constant (A, C2) | Aucune minute utile sans échantillon, aucun pic au-delà de 1,82 × 196 ÷ √n_minute (28 minutes), au plus 4 minutes sur 28 hors de 196 ÷ √n_minute (`efv lire --stabilite`, recalcul dans `efv rapport --series series.csv`). Sans série : non évalué, pas validé. |
 | Absence de biais | Sur 3 répétitions, la moyenne des erreurs est proche de 0 |
 | Détection au plancher (A1) | Fréquence de détection cohérente avec 1 − exp(−n attendu) |
 | Marquage (Q1) | 100 % des DSCP émis retrouvés au point A ; écarts au point B expliqués par la politique de l'opérateur |

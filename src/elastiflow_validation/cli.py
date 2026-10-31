@@ -455,7 +455,15 @@ def commande_rapport(arguments: argparse.Namespace) -> int:
     )
     try:
         points = rapport.points_mesure(arguments.point_mesure)
-        n = rapport.rapport(arguments.resultats, arguments.lectures, arguments.sortie, points)
+        n = rapport.rapport(
+            arguments.resultats,
+            arguments.lectures,
+            arguments.sortie,
+            points,
+            arguments.series,
+            arguments.bord,
+            arguments.cv,
+        )
         if arguments.calibration:
             champs = lecture.charger_champs(arguments.champs)
             rapport.ecrire_calibration(
@@ -499,6 +507,9 @@ def _ajouter_rapport(sous: argparse._SubParsersAction) -> None:
         metavar="EXPORTATEUR=IFINDEX",
         help="échantillonneur retenu par exportateur (répétable, #30)",
     )
+    p.add_argument("--series", type=Path, help="minutes brutes issues de lire, pour A et C2 (#31)")
+    p.add_argument("--bord", type=int, default=lecture.BORD_S, help="même bord que lors de lire")
+    p.add_argument("--cv", type=float, default=0.0, help="CV des tailles pour la stabilité")
     p.add_argument(
         "--sortie", type=Path, default=Path("rapport-validation.md"), help="fichier écrit"
     )

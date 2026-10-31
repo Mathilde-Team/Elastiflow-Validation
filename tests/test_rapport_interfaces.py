@@ -45,7 +45,7 @@ def test_volumes_lus_par_echantillonneur(tmp_path):
         "echantillonneurs"
     ]
     assert agg["terms"]["missing"] == -1
-    assert set(agg["aggs"]) == {"octets", "paquets"}
+    assert set(agg["aggs"]) == {"octets", "paquets", "minutes"}
 
 
 @pytest.mark.parametrize("indicateur", ["sum_other_doc_count", "doc_count_error_upper_bound"])

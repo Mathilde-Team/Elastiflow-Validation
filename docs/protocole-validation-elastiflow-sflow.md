@@ -750,6 +750,12 @@ CSV ambigus doivent être relus, jamais corrigés en divisant le total par deux.
 
 ### 9.4 Quoi lire pour chaque objectif
 
+`efv rapport --series series.csv` recalcule le verdict de constance pour A et C2,
+séparément du volume. La jointure inclut l'échantillonneur choisi par `--point-mesure` :
+le total de deux points ne peut pas prouver la stabilité d'un seul point. Les minutes
+absentes sont rendues avec zéro échantillon ; sans fichier, le critère reste non évalué.
+Conserver les mêmes options `--bord` et `--cv` entre lecture et rapport.
+
 | Objectif | Lecture dans ElastiFlow |
 |---|---|
 | **Justesse du débit** | Somme des octets sur la fenêtre, comparée à la référence ; erreur par rapport à la borne `196 ÷ √n`. |

@@ -341,7 +341,7 @@ def requete_test(
     if champs.get("echantillonneur"):
         par_exportateur["echantillonneurs"] = {
             "terms": {"field": champs["echantillonneur"], "size": 100, "missing": -1},
-            "aggs": sommes,
+            "aggs": {**sommes, "minutes": par_exportateur["minutes"]},
         }
     corps = {
         "size": 0,
@@ -424,7 +424,7 @@ def lire_test(
     banc: Banc,
     delai_s: int = DELAI_S,
     bord_s: int = BORD_S,
-    series: list[tuple[str, str, str, list[stabilite.Minute]]] | None = None,
+    series: list[stabilite.Serie] | None = None,
 ) -> list[list[str]]:
     """Lignes de ``lectures.csv`` d'un test, une par exportateur (aucune si rien n'est indexé).
 
@@ -462,6 +462,13 @@ def lire_test(
         if series is not None:
             serie = stabilite.serie_minutes(minutes, utile_bas, utile_haut)
             series.append((ligne["id"], ligne["repetition"], str(exp["key"]), serie))
+            for point in exp.get("echantillonneurs", {}).get("buckets", []):
+                serie = stabilite.serie_minutes(
+                    point.get("minutes", {}).get("buckets", []), utile_bas, utile_haut
+                )
+                series.append(
+                    (ligne["id"], ligne["repetition"], str(exp["key"]), serie, str(point["key"]))
+                )
     logger.debug("lire_test : sortie {} exportateur(s)", len(lignes))
     return lignes
 
@@ -525,7 +532,7 @@ def lire(
             logger.warning("lecture différée (délai d'agrégation non écoulé) : {}", en_attente)
         tests = [t for t in tests if int(t["fin"]) + delai_s <= limite]
     lignes: list[list[str]] = []
-    collecte: list[tuple[str, str, str, list[stabilite.Minute]]] | None = None
+    collecte: list[stabilite.Serie] | None = None
     if series is not None or verdicts is not None:
         collecte = []
     for t in tests:

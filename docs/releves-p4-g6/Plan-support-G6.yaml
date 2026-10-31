@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Trafic de support proposé pour G6 : une seule exécution A3, pas une recette complète.
+# Prévisualiser avec --dry-run ; toute injection réelle exige l'accord du responsable du banc.
+version: 1
+tests:
+  - id: A3
+    serie: A
+    protocole: udp
+    debit: 10%
+    taille: 1000
+    dscp: BF
+    duree: 1800
+    repetitions: 1
+    sampling: nominal
+    objectif: "Support G6 : débit constant 30 min ; compteurs matériels relevés séparément"
